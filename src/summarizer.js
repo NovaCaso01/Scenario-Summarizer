@@ -570,9 +570,15 @@ export function parseBatchGroupsResponse(response, groups) {
             pattern.lastIndex = 0; // 리셋
         }
         
-        // 매칭 실패 시, 순서대로 청크 분할 시도
+        // 매칭 실패 시, 플레이스홀더 저장 (요약은 실패했지만 처리됨으로 마킹)
         if (!matched) {
-            log(`Pattern match failed for group #${startNum}-${endNum}, trying chunk split`);
+            log(`Pattern match failed for group #${startNum}-${endNum}, saving placeholder`);
+            // 첫 번째 인덱스에 파싱 실패 표시와 함께 저장
+            result[group.indices[0]] = `#${startNum}-${endNum}\n[요약 파싱 실패 - 재요약 필요]`;
+            // 나머지 인덱스는 그룹에 포함됨 표시
+            for (let i = 1; i < group.indices.length; i++) {
+                result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+            }
         }
     }
     

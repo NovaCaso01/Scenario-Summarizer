@@ -170,16 +170,32 @@ async function callCustomAPI(prompt) {
         const timeoutId = setTimeout(() => controller.abort(), timeout);
         
         const maxTokens = settings.customApiMaxTokens || 4000; // 설정에서 max_tokens 가져오기
+        const model = settings.customApiModel.toLowerCase();
+        
+        // OpenAI 새 모델들은 max_completion_tokens 사용
+        // o1, o1-mini, o1-preview, o3, o3-mini 및 최신 gpt-4o 모델들
+        const useMaxCompletionTokens = /^(o1|o3|gpt-4o-2024-1[12])/.test(model) || 
+                                        model.includes('o1-') || 
+                                        model.includes('o3-');
+        
+        const requestBody = {
+            model: settings.customApiModel,
+            messages: [{ role: "user", content: prompt }],
+            temperature: 0.3
+        };
+        
+        // 토큰 파라미터 선택
+        if (useMaxCompletionTokens) {
+            requestBody.max_completion_tokens = maxTokens;
+            log(`Using max_completion_tokens for model: ${settings.customApiModel}`);
+        } else {
+            requestBody.max_tokens = maxTokens;
+        }
         
         const response = await fetch(settings.customApiUrl, {
             method: "POST",
             headers: headers,
-            body: JSON.stringify({
-                model: settings.customApiModel,
-                messages: [{ role: "user", content: prompt }],
-                max_tokens: maxTokens,
-                temperature: 0.3
-            }),
+            body: JSON.stringify(requestBody),
             signal: controller.signal
         });
         
