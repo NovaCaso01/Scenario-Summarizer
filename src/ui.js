@@ -28,6 +28,32 @@ import { loadModels, testApiConnection, getApiStatus } from './api.js';
 let currentPage = 0;
 const ITEMS_PER_PAGE = 10;
 
+// 토큰 카운터 함수 (동적 로드)
+let getTokenCountAsync = null;
+
+/**
+ * 토큰 카운터 함수 초기화
+ */
+async function initTokenCounter() {
+    if (getTokenCountAsync) return;
+    
+    try {
+        // tokenizers.js에서 getTokenCountAsync 함수를 동적으로 import
+        // 상대 경로를 절대 경로로 변경
+        const tokenizersModule = await import('/scripts/tokenizers.js');
+        getTokenCountAsync = tokenizersModule.getTokenCountAsync;
+        console.log(`[${extensionName}] Token counter initialized successfully`);
+    } catch (e) {
+        console.warn(`[${extensionName}] Failed to load tokenizers module:`, e);
+        // 폴백: 간단한 추정 함수
+        getTokenCountAsync = async (text) => {
+            const koreanChars = (text.match(/[\u3131-\uD79D]/g) || []).length;
+            const otherChars = text.length - koreanChars;
+            return Math.ceil(koreanChars / 2 + otherChars / 4);
+        };
+    }
+}
+
 /**
  * 설정 저장
  */
@@ -479,15 +505,6 @@ export function updateStatusDisplay() {
     const summarizedCount = Object.keys(summaries).length;
     const pendingCount = totalMessages - summarizedCount;
     
-    // 토큰 계산
-    let totalTokens = 0;
-    for (const index of Object.keys(summaries)) {
-        const content = summaries[index]?.content || '';
-        if (!content.startsWith('[→') && !content.includes('그룹 요약에 포함')) {
-            totalTokens += Math.ceil(content.length / 4);
-        }
-    }
-    
     const settings = getSettings();
     const interval = settings.summaryInterval || 10;
     const nextTrigger = Math.max(0, interval - pendingCount);
@@ -590,16 +607,16 @@ function updateProgress(current, total) {
 /**
  * 요약 목록 보기
  */
-export function viewSummaries() {
+export async function viewSummaries() {
     currentPage = 0;
-    renderSummaryList();
+    await renderSummaryList();
     $("#summarizer-preview").show();
 }
 
 /**
  * 요약 목록 렌더링
  */
-function renderSummaryList() {
+async function renderSummaryList() {
     const summaries = getRelevantSummaries();
     const allIndices = Object.keys(summaries).map(Number).sort((a, b) => b - a); // 최신순
     
@@ -624,18 +641,28 @@ function renderSummaryList() {
     const endIdx = Math.min(startIdx + ITEMS_PER_PAGE, indices.length);
     const pageIndices = indices.slice(startIdx, endIdx);
     
-    // 전체 토큰 계산
-    let totalTokens = 0;
+    // 토큰 카운터 초기화
+    await initTokenCounter();
+    
+    // 전체 토큰 계산 (SillyTavern의 토큰 카운터 사용)
+    // 모든 요약 내용을 하나의 텍스트로 합치기
+    let allContent = '';
     for (const index of allIndices) {
         const content = summaries[index]?.content || '';
         if (!content.startsWith('[→') && !content.includes('그룹 요약에 포함')) {
-            totalTokens += Math.ceil(content.length / 4);
+            allContent += content + '\n';
         }
+    }
+    
+    // 전체 내용을 한 번에 계산
+    let totalTokens = 0;
+    if (allContent.length > 0) {
+        totalTokens = await getTokenCountAsync(allContent);
     }
     
     let html = `<div class="summarizer-summary-header">
         <strong>${getCharacterName()} 시나리오 요약</strong>
-        <small>총 ${indices.length}개 · ~${totalTokens} 토큰</small>
+        <small>총 ${indices.length}개 · ${totalTokens.toLocaleString()} 토큰</small>
     </div>`;
     
     for (const index of pageIndices) {
@@ -714,26 +741,26 @@ function renderSummaryList() {
         $pageJump.show();
         $("#summarizer-page-input").attr("max", totalPages).attr("placeholder", `1-${totalPages}`);
         
-        $("#summarizer-prev-page").on("click", () => {
+        $("#summarizer-prev-page").on("click", async () => {
             if (currentPage > 0) {
                 currentPage--;
-                renderSummaryList();
+                await renderSummaryList();
             }
         });
         
-        $("#summarizer-next-page").on("click", () => {
+        $("#summarizer-next-page").on("click", async () => {
             if (currentPage < totalPages - 1) {
                 currentPage++;
-                renderSummaryList();
+                await renderSummaryList();
             }
         });
         
         // 페이지 직접 이동
-        $("#summarizer-page-go").off("click").on("click", () => {
+        $("#summarizer-page-go").off("click").on("click", async () => {
             const inputVal = parseInt($("#summarizer-page-input").val());
             if (!isNaN(inputVal) && inputVal >= 1 && inputVal <= totalPages) {
                 currentPage = inputVal - 1;
-                renderSummaryList();
+                await renderSummaryList();
             } else {
                 showToast('warning', `1~${totalPages} 사이의 페이지를 입력하세요.`);
             }
@@ -777,7 +804,7 @@ function bindEntryEvents() {
         injectSummaryToPrompt();
         
         showToast('success', `#${idx} 요약이 수정되었습니다.`);
-        renderSummaryList();
+        await renderSummaryList();
     });
     
     // 취소
@@ -819,7 +846,7 @@ function bindEntryEvents() {
                 ? `#${result.startIdx}-${result.endIdx} 그룹 요약이 재생성되었습니다.`
                 : `#${idx} 요약이 재생성되었습니다.`;
             showToast('success', successMsg);
-            renderSummaryList();
+            await renderSummaryList();
         } else {
             showToast('error', result.error || '재생성 실패');
         }
@@ -837,7 +864,7 @@ function bindEntryEvents() {
         applyMessageVisibility();
         
         showToast('success', `#${idx} 요약이 삭제되었습니다.`);
-        renderSummaryList();
+        await renderSummaryList();
         updateStatusDisplay();
     });
 }

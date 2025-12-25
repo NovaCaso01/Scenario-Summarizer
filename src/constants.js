@@ -189,7 +189,25 @@ Analyze the provided single message and extract/summarize information according 
 2. **Contextual Connection:** Instead of simple enumeration, connect events narratively to show cause-and-effect relationships.
 3. **Priority Judgment:** Boldly omit trivial greetings or meaningless chatter; focus on actions, events, and dialogue essential to story progression.
 4. **Consistency:** End sentences with dry, clear declarative statements (e.g., "~did.").
-5. **Continuity:** Only specify time/location/relationship when there are changes.`;
+5. **Continuity:** Only specify time/location/relationship when there are changes.
+
+## ⚠️ CRITICAL: Output Format Rules
+**YOU MUST follow this EXACT format. Any deviation will cause parsing failure.**
+
+1. Start each category line with "* " (asterisk + space)
+2. Use format: "* CategoryLabel: content"
+3. Do NOT use markdown bold (**), bullets (-), numbered lists, or other decorations
+4. Do NOT skip any enabled categories
+5. Keep category content compact (can span multiple lines if needed)
+
+WRONG examples:
+- **CategoryLabel:** content  ❌ (no bold)
+- - CategoryLabel: content    ❌ (no dash)
+- CategoryLabel: content      ❌ (no asterisk)
+- *CategoryLabel: content     ❌ (needs space)
+
+CORRECT example:
+* CategoryLabel: content      ✅`;
 
 // 묶음 요약 - 사용자 수정 가능 부분 (지침만)
 export const DEFAULT_BATCH_PROMPT_TEMPLATE = `You are a skilled writer and editor who weaves extensive roleplay logs into a cohesive narrative flow.
@@ -202,7 +220,25 @@ Integrate multiple messages (chunks) into a single, naturally flowing narrative 
 2. **Contextual Connection:** Instead of simple enumeration, connect events narratively to show cause-and-effect relationships.
 3. **Priority Judgment:** Boldly omit trivial greetings or meaningless chatter; focus on actions, events, and dialogue essential to story progression.
 4. **Consistency:** End sentences with dry, clear declarative statements (e.g., "~did.").
-5. **Continuity:** Only specify time/location/relationship when there are changes.`;
+5. **Continuity:** Only specify time/location/relationship when there are changes.
+
+## ⚠️ CRITICAL: Output Format Rules
+**YOU MUST follow this EXACT format. Any deviation will cause parsing failure.**
+
+1. Start each group with "#StartNum-EndNum" on its own line
+2. Start each category line with "* " (asterisk + space)
+3. Use format: "* CategoryLabel: content"
+4. Separate groups with blank line
+5. Do NOT use markdown bold (**), bullets (-), or other decorations
+
+CORRECT example:
+#0-4
+* Scenario: content here
+* Location: content here
+
+#5-9
+* Scenario: content here
+* Location: content here`;
 
 // 등장인물 추출 - 사용자 수정 가능 부분 (지침만)
 export const DEFAULT_CHARACTER_PROMPT_TEMPLATE = `Generate profiles for **key characters** who impact the story from the following text.

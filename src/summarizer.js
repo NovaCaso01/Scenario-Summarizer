@@ -26,6 +26,78 @@ const REGEX_CHARACTERS_JSON = /\[CHARACTERS_JSON\]\s*([\s\S]*?)\s*\[\/CHARACTERS
 const REGEX_GROUP_HEADER = /^#\d+-\d+\s*\n?/;
 
 /**
+ * 폴백 파싱: 정규식 실패 시 라인별 파싱 시도
+ * @param {string} text - 파싱할 텍스트
+ * @param {number} startNum - 시작 번호
+ * @param {number} endNum - 끝 번호
+ * @returns {string|null} - 파싱된 요약 또는 null
+ */
+function parseFallback(text, startNum, endNum) {
+    try {
+        const lines = text.split('\n');
+        let inTargetGroup = false;
+        let summaryLines = [];
+        
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i].trim();
+            
+            // 그룹 헤더 감지 (다양한 형식 허용)
+            const headerMatch = line.match(/^[#\[【]?\s*(\d+)\s*[-~]\s*(\d+)\s*[\]】]?/);
+            
+            if (headerMatch) {
+                const groupStart = parseInt(headerMatch[1]);
+                const groupEnd = parseInt(headerMatch[2]);
+                
+                if (groupStart === startNum && groupEnd === endNum) {
+                    inTargetGroup = true;
+                    continue;
+                } else if (inTargetGroup) {
+                    // 다른 그룹 시작 = 현재 그룹 종료
+                    break;
+                }
+            }
+            
+            // 타겟 그룹 내용 수집
+            if (inTargetGroup && line) {
+                // 카테고리 라인 정규화 (*, -, •, ** 등 제거)
+                const normalized = line.replace(/^[*\-•]+\s*\*?\s*/, '* ');
+                summaryLines.push(normalized);
+            }
+        }
+        
+        // 타겟 그룹에서 정상적으로 추출된 경우에만 반환
+        if (summaryLines.length > 0) {
+            return summaryLines.join('\n');
+        }
+        
+        // 그룹 헤더 자체가 없는 경우 (단일 요약일 가능성)
+        // 전체 텍스트에서 카테고리 라인만 추출
+        const categoryPattern = /^[*\-•]\s*[^:：]+[:：]/;
+        const extractedLines = [];
+        
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (categoryPattern.test(trimmed)) {
+                const normalized = trimmed.replace(/^[*\-•]+\s*\*?\s*/, '* ');
+                extractedLines.push(normalized);
+            }
+        }
+        
+        // 추출된 라인이 있고, 전체 텍스트 길이가 합리적인 경우에만 반환
+        // (너무 많으면 전체 묶음 요약을 잘못 파싱한 것일 수 있음)
+        if (extractedLines.length > 0 && extractedLines.length <= 20) {
+            return extractedLines.join('\n');
+        }
+        
+        return null;
+        
+    } catch (e) {
+        log(`Fallback parsing error: ${e.message}`);
+        return null;
+    }
+}
+
+/**
  * SillyTavern에서 프로필 정보 가져오기 (캐릭터 카드, 페르소나, 월드인포)
  * 요약 시 캐릭터와 유저의 컨텍스트 정보를 제공
  * @returns {string} - 프로필 정보 텍스트
@@ -570,14 +642,24 @@ export function parseBatchGroupsResponse(response, groups) {
             pattern.lastIndex = 0; // 리셋
         }
         
-        // 매칭 실패 시, 플레이스홀더 저장 (요약은 실패했지만 처리됨으로 마킹)
+        // 매칭 실패 시, 폴백 파싱 시도
         if (!matched) {
-            log(`Pattern match failed for group #${startNum}-${endNum}, saving placeholder`);
-            // 첫 번째 인덱스에 파싱 실패 표시와 함께 저장
-            result[group.indices[0]] = `#${startNum}-${endNum}\n[요약 파싱 실패 - 재요약 필요]`;
-            // 나머지 인덱스는 그룹에 포함됨 표시
-            for (let i = 1; i < group.indices.length; i++) {
-                result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+            log(`Pattern match failed for group #${startNum}-${endNum}, trying fallback parsing`);
+            const fallbackSummary = parseFallback(cleanResponse, startNum, endNum);
+            
+            if (fallbackSummary) {
+                result[group.indices[0]] = `#${startNum}-${endNum}\n${fallbackSummary}`;
+                for (let i = 1; i < group.indices.length; i++) {
+                    result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+                }
+                log(`Fallback parsing succeeded for #${startNum}-${endNum}`);
+            } else {
+                // 폴백도 실패 시 플레이스홀더
+                log(`All parsing failed for #${startNum}-${endNum}, saving placeholder`);
+                result[group.indices[0]] = `#${startNum}-${endNum}\n[요약 파싱 실패 - 재요약 필요]`;
+                for (let i = 1; i < group.indices.length; i++) {
+                    result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+                }
             }
         }
     }
