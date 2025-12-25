@@ -219,8 +219,11 @@
     z-index: 1;
     width: 90%;
     max-width: 600px;
+    height: 85vh;
+    height: 85dvh; /* 동적 뷰포트 높이 (모바일 브라우저 URL바 고려) */
     max-height: 85vh;
-    min-height: 200px;
+    max-height: 85dvh;
+    min-height: 300px;
     margin: auto;
     background: var(--sum-bg-primary);
     border: 1px solid var(--sum-border);
@@ -229,17 +232,24 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    /* iOS safe area 지원 */
+    padding-bottom: env(safe-area-inset-bottom, 0);
 }
 
 /* ===== 반응형 - 모바일 ===== */
 @media screen and (max-width: 480px) {
     #scenario-summarizer-popup {
         padding: var(--summarizer-spacing-sm);
+        padding-top: env(safe-area-inset-top, var(--summarizer-spacing-sm));
+        padding-bottom: env(safe-area-inset-bottom, var(--summarizer-spacing-sm));
     }
     
     .summarizer-popup-content {
         width: 100%;
-        max-height: 95vh;
+        height: calc(100vh - 20px);
+        height: calc(100dvh - 20px); /* 동적 뷰포트 - 모바일 브라우저 호환 */
+        max-height: calc(100vh - 20px);
+        max-height: calc(100dvh - 20px);
         border-radius: var(--summarizer-radius-md);
     }
     
@@ -389,7 +399,10 @@
     
     .summarizer-popup-content {
         width: 95%;
+        height: 90vh;
+        height: 90dvh;
         max-height: 90vh;
+        max-height: 90dvh;
     }
     
     .summarizer-tab {
@@ -401,7 +414,10 @@
 /* ===== 반응형 - 높이 제한 ===== */
 @media screen and (max-height: 600px) {
     .summarizer-popup-content {
-        max-height: 95vh;
+        height: calc(100vh - 16px);
+        height: calc(100dvh - 16px);
+        max-height: calc(100vh - 16px);
+        max-height: calc(100dvh - 16px);
     }
     
     #scenario-summarizer-popup {
@@ -497,8 +513,10 @@
 
 /* ===== 바디 (스크롤 영역) ===== */
 .summarizer-body {
-    flex: 1;
+    flex: 1 1 auto;
+    min-height: 0; /* flexbox 내 overflow 스크롤이 작동하도록 필수 */
     overflow-y: auto;
+    -webkit-overflow-scrolling: touch; /* iOS 부드러운 스크롤 */
     padding: var(--summarizer-spacing-xl);
 }
 

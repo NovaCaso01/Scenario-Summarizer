@@ -76,14 +76,20 @@ function loadSettings() {
 /**
  * 마법봉 메뉴에 버튼 추가
  */
-function addExtensionMenuButton() {
+function addExtensionMenuButton(retryCount = 0) {
+    const MAX_RETRIES = 10;
+    
     // 이미 존재하면 스킵
     if ($("#summarizer-menu-item").length > 0) return;
     
     const extensionsMenu = document.getElementById("extensionsMenu");
     if (!extensionsMenu) {
-        log('extensionsMenu not found, retrying...');
-        setTimeout(addExtensionMenuButton, 1000);
+        if (retryCount < MAX_RETRIES) {
+            log(`extensionsMenu not found, retrying... (${retryCount + 1}/${MAX_RETRIES})`);
+            setTimeout(() => addExtensionMenuButton(retryCount + 1), 1000);
+        } else {
+            console.error(`[${extensionName}] extensionsMenu not found after ${MAX_RETRIES} retries`);
+        }
         return;
     }
     
@@ -116,13 +122,30 @@ async function init() {
     // 설정 로드
     loadSettings();
     
-    // 팝업 HTML 로드
-    try {
-        const popupHtml = await $.get(`${extensionFolderPath}/popup.html`);
-        $("body").append(popupHtml);
-        log('Popup HTML loaded');
-    } catch (error) {
-        console.error(`[${extensionName}] Failed to load popup.html:`, error);
+    // 팝업 HTML 로드 - 여러 경로 시도
+    const possiblePaths = [
+        `${extensionFolderPath}/popup.html`,
+        `scripts/extensions/third-party/scenario-summarizer/popup.html`,
+        `scripts/extensions/third-party/Scenario-Summarizer/popup.html`,
+        `data/default-user/extensions/scenario-summarizer/popup.html`,
+        `data/default-user/extensions/Scenario-Summarizer/popup.html`,
+    ];
+    
+    let popupLoaded = false;
+    for (const path of possiblePaths) {
+        try {
+            const popupHtml = await $.get(path);
+            $("body").append(popupHtml);
+            log(`Popup HTML loaded from: ${path}`);
+            popupLoaded = true;
+            break;
+        } catch (error) {
+            log(`Failed to load popup.html from ${path}, trying next...`);
+        }
+    }
+    
+    if (!popupLoaded) {
+        console.error(`[${extensionName}] Failed to load popup.html from all paths:`, possiblePaths);
         return;
     }
     

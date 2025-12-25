@@ -4,7 +4,48 @@
 
 // 확장 기본 정보
 export const extensionName = "scenario-summarizer";
-export const extensionFolderPath = `scripts/extensions/third-party/${extensionName}`;
+
+// 확장 폴더 경로 - 동적으로 감지
+// SillyTavern은 third-party 또는 data/user/extensions 경로를 사용할 수 있음
+function detectExtensionPath() {
+    // 현재 스크립트의 경로에서 추출 시도
+    try {
+        const scripts = document.querySelectorAll('script[src*="scenario-summarizer"], script[src*="Scenario-Summarizer"]');
+        for (const script of scripts) {
+            const src = script.src;
+            const match = src.match(/(.+?(?:scenario-summarizer|Scenario-Summarizer))/i);
+            if (match) {
+                // URL에서 상대 경로 추출
+                const url = new URL(match[1]);
+                return url.pathname.replace(/^\//, '');
+            }
+        }
+    } catch (e) {
+        console.warn('[scenario-summarizer] Script path detection failed:', e);
+    }
+    
+    // import.meta.url 사용 시도 (ES modules)
+    try {
+        if (typeof import.meta !== 'undefined' && import.meta.url) {
+            const url = new URL(import.meta.url);
+            const pathParts = url.pathname.split('/');
+            // constants.js는 src/ 폴더 안에 있으므로 상위 폴더 경로 추출
+            const extIndex = pathParts.findIndex(p => 
+                p.toLowerCase() === 'scenario-summarizer' || p === 'Scenario-Summarizer'
+            );
+            if (extIndex !== -1) {
+                return pathParts.slice(1, extIndex + 1).join('/');
+            }
+        }
+    } catch (e) {
+        console.warn('[scenario-summarizer] import.meta.url detection failed:', e);
+    }
+    
+    // 폴백: 여러 가능한 경로 시도
+    return `scripts/extensions/third-party/${extensionName}`;
+}
+
+export const extensionFolderPath = detectExtensionPath();
 export const METADATA_KEY = "scenario_summarizer";
 export const DATA_VERSION = 2; // 데이터 구조 버전 (마이그레이션용)
 
