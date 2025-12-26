@@ -83,7 +83,7 @@ export const defaultSettings = {
     includeWorldInfo: false,       // 요약 시 World Info 포함 여부
     
     // 주입 위치 설정
-    injectionPosition: "in-chat",  // "in-chat" (채팅 내 지정 깊이), "before-main" (메인 프롬프트 전), "after-main" (메인 프롬프트 후)
+    injectionPosition: "after-main",  // "in-chat" (채팅 내 지정 깊이), "before-main" (메인 프롬프트 전), "after-main" (메인 프롬프트 후)
     injectionDepth: 0,             // in-chat 모드일 때 주입 깊이 (0 = 채팅 메시지 직전)
     
     // 토큰 예산
