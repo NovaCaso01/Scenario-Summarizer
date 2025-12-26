@@ -7,6 +7,7 @@ import { setExtensionPrompt, extension_prompt_types } from "../../../../../scrip
 import { extensionName, getCharacterJsonCleanupPattern } from './constants.js';
 import { log, getSettings } from './state.js';
 import { getSummaryData, getRelevantSummaries, getCharacterName, getRelevantCharacters, formatCharactersText } from './storage.js';
+import { getTokenCounter } from './ui.js';
 
 // setExtensionPrompt 사용 가능 여부
 let extensionPromptAvailable = true;
@@ -24,21 +25,40 @@ function cleanSummaryContent(content) {
 
 /**
  * 안전하게 setExtensionPrompt 호출
- * @param {string} content 
+ * @param {string} summaryContent - 요약 내용
+ * @param {Object} settings - 설정 객체
  * @returns {boolean}
  */
-function safeSetExtensionPrompt(content) {
+function safeSetExtensionPrompt(summaryContent, settings = null) {
     if (!extensionPromptAvailable) {
         return false;
     }
     
     try {
         if (typeof setExtensionPrompt === 'function') {
+            // 설정에서 주입 위치 가져오기
+            const position = settings?.injectionPosition || 'in-chat';
+            const depth = settings?.injectionDepth !== undefined ? settings.injectionDepth : 0;
+            
+            // 요약 내용이 있으면 고정 포맷 적용, 없으면 빈 문자열
+            const content = summaryContent ? `[Scenario Summary]\n${summaryContent}` : '';
+            
+            // 위치에 따라 extension_prompt_types 선택
+            let promptType;
+            if (position === 'before-main') {
+                promptType = extension_prompt_types.BEFORE_PROMPT;
+            } else if (position === 'after-main') {
+                promptType = extension_prompt_types.AFTER_PROMPT || extension_prompt_types.IN_PROMPT;
+            } else {
+                // in-chat (default)
+                promptType = extension_prompt_types.IN_CHAT;
+            }
+            
             setExtensionPrompt(
                 extensionName,
                 content,
-                extension_prompt_types.IN_CHAT,
-                4  // depth
+                promptType,
+                depth
             );
             return true;
         } else {
@@ -55,18 +75,18 @@ function safeSetExtensionPrompt(content) {
 /**
  * 요약을 프롬프트에 주입
  */
-export function injectSummaryToPrompt() {
+export async function injectSummaryToPrompt() {
     const settings = getSettings();
     
     // 비활성화면 주입 제거
     if (!settings.enabled) {
-        safeSetExtensionPrompt('');
+        safeSetExtensionPrompt('', settings);
         return;
     }
     
     const context = getContext();
     if (!context.chat || context.chat.length === 0) {
-        safeSetExtensionPrompt('');
+        safeSetExtensionPrompt('', settings);
         return;
     }
     
@@ -75,20 +95,20 @@ export function injectSummaryToPrompt() {
     const summaryIndices = Object.keys(summaries).map(Number).sort((a, b) => b - a);
     
     if (summaryIndices.length === 0) {
-        safeSetExtensionPrompt('');
+        safeSetExtensionPrompt('', settings);
         return;
     }
     
     const charName = getCharacterName();
     const data = getSummaryData();
     const tokenBudget = settings.tokenBudget || 2000;
+    const getTokenCountAsync = getTokenCounter();
     
     // 토큰 예산 내에서 요약 구성
     let summaryText = `[${charName} 시나리오 요약]\n`;
-    summaryText += `마지막 업데이트: ${data?.lastUpdate || "알 수 없음"}\n`;
     summaryText += `${"=".repeat(40)}\n\n`;
     
-    let estimatedTokens = summaryText.length / 4; // 대략적 토큰 추정
+    let estimatedTokens = getTokenCountAsync ? await getTokenCountAsync(summaryText) : Math.ceil(summaryText.length / 4);
     let includedCount = 0;
     let skippedCount = 0;
     const includedSummaries = [];
@@ -108,7 +128,7 @@ export function injectSummaryToPrompt() {
             continue;
         }
         
-        const contentTokens = content.length / 4;
+        const contentTokens = getTokenCountAsync ? await getTokenCountAsync(content) : Math.ceil(content.length / 4);
         
         // 토큰 예산 확인
         if (estimatedTokens + contentTokens > tokenBudget) {
@@ -123,7 +143,7 @@ export function injectSummaryToPrompt() {
     }
     
     if (includedCount === 0) {
-        safeSetExtensionPrompt('');
+        safeSetExtensionPrompt('', settings);
         return;
     }
     
@@ -152,7 +172,8 @@ export function injectSummaryToPrompt() {
         if (charactersText) {
             summaryText += `[등장인물 정보]\n`;
             summaryText += charactersText + "\n";
-            estimatedTokens += charactersText.length / 4;
+            const charTokens = getTokenCountAsync ? await getTokenCountAsync(charactersText) : Math.ceil(charactersText.length / 4);
+            estimatedTokens += charTokens;
         }
     }
     
@@ -160,8 +181,8 @@ export function injectSummaryToPrompt() {
         log(`Token budget exceeded: included=${includedCount}, skipped=${skippedCount}`);
     }
     
-    // 프롬프트 주입
-    const success = safeSetExtensionPrompt(summaryText);
+    // 프롬프트 주입 (템플릿 적용된 형태로)
+    const success = safeSetExtensionPrompt(summaryText, settings);
     
     if (success) {
         log(`Summary injected: ${includedCount} entries, ~${Math.round(estimatedTokens)} tokens`);
@@ -172,15 +193,16 @@ export function injectSummaryToPrompt() {
  * 프롬프트 주입 제거
  */
 export function clearInjection() {
-    safeSetExtensionPrompt('');
+    const settings = getSettings();
+    safeSetExtensionPrompt('', settings);
     log('Summary injection cleared');
 }
 
 /**
  * 현재 주입될 요약 텍스트 미리보기
- * @returns {string}
+ * @returns {Promise<string>}
  */
-export function getInjectionPreview() {
+export async function getInjectionPreview() {
     const settings = getSettings();
     const summaries = getRelevantSummaries();
     // 최신순(내림차순)으로 정렬하여 토큰 초과 시 오래된 요약이 제외되도록 함
@@ -193,12 +215,12 @@ export function getInjectionPreview() {
     const charName = getCharacterName();
     const data = getSummaryData();
     const tokenBudget = settings.tokenBudget || 2000;
+    const getTokenCountAsync = getTokenCounter();
     
     let text = `[${charName} 시나리오 요약]\n`;
-    text += `마지막 업데이트: ${data?.lastUpdate || "알 수 없음"}\n`;
     text += `${"=".repeat(40)}\n\n`;
     
-    let estimatedTokens = text.length / 4;
+    let estimatedTokens = getTokenCountAsync ? await getTokenCountAsync(text) : Math.ceil(text.length / 4);
     const includedSummaries = [];
     let skippedFromBudget = 0;
     
@@ -211,7 +233,7 @@ export function getInjectionPreview() {
             continue;
         }
         
-        const contentTokens = content.length / 4;
+        const contentTokens = getTokenCountAsync ? await getTokenCountAsync(content) : Math.ceil(content.length / 4);
         
         if (estimatedTokens + contentTokens > tokenBudget) {
             skippedFromBudget++;

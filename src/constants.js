@@ -67,8 +67,8 @@ export const defaultSettings = {
     preserveRecentMessages: 5,     // 숨기지 않을 최근 메세지 수
     
     // 요약 모드 설정
-    summaryMode: "individual",     // "individual" = 개별 메세지별, "batch" = N개를 하나로 뫆어서
-    batchGroupSize: 5,            // batch 모드일 때 몇 개씩 묶어서 요약할지
+    summaryMode: "batch",         // "individual" = 개별 메세지별, "batch" = N개를 하나로 묶어서
+    batchGroupSize: 5,             // batch 모드일 때 몇 개씩 묶어서 요약할지
     
     // 요약 언어 설정
     summaryLanguage: "en",         // "ko" = 한국어, "en" = English, "ja" = 日本語, "hybrid" = 대사 원문 유지
@@ -78,6 +78,13 @@ export const defaultSettings = {
     
     // 등장인물 추적 설정
     characterTrackingEnabled: true, // 요약 시 등장인물 자동 추출/업데이트
+    
+    // 월드인포 포함 여부
+    includeWorldInfo: false,       // 요약 시 World Info 포함 여부
+    
+    // 주입 위치 설정
+    injectionPosition: "in-chat",  // "in-chat" (채팅 내 지정 깊이), "before-main" (메인 프롬프트 전), "after-main" (메인 프롬프트 후)
+    injectionDepth: 0,             // in-chat 모드일 때 주입 깊이 (0 = 채팅 메시지 직전)
     
     // 토큰 예산
     tokenBudget: 20000,            // 주입할 최대 토큰 수
@@ -89,49 +96,49 @@ export const defaultSettings = {
     categories: {
         scenario: {
             enabled: true,
-            label: "시나리오",
+            label: "Scenario",
             icon: "📖",
             prompt: "Summarize the cause-and-effect flow of events narratively. Focus on 'who did what and why' rather than simple enumeration. Include important dialogue using double quotes (\"\") with direct quotation from the original text to maintain character voice."
         },
         emotion: {
             enabled: false,
-            label: "감정",
+            label: "Emotion",
             icon: "😊",
             prompt: "Write each line as '- CharacterName: Emotion (cause)'. Separate by character using line breaks. Example: - {{user}}: Bewilderment (due to sudden confession)"
         },
         innerThoughts: {
             enabled: false,
-            label: "속마음",
+            label: "Inner Thoughts",
             icon: "💭",
             prompt: "Record ONLY inner monologues or thoughts explicitly shown in the message. Do NOT speculate or fabricate. Write only what is directly expressed in text as '- CharacterName: \"inner thought\"'. If no explicit inner thoughts exist, write 'N/A'."
         },
         atmosphere: {
             enabled: false,
-            label: "분위기",
+            label: "Atmosphere",
             icon: "🌙",
             prompt: "Briefly describe the scene's overall tension, tone, and mood with adjectives. (e.g., dark and humid, tense, peaceful)"
         },
         location: {
             enabled: true,
-            label: "장소",
+            label: "Location",
             icon: "📍",
             prompt: "Briefly specify the physical location where characters are. Use arrow (→) if there was movement. If no movement, write same as previous."
         },
         date: {
-            enabled: true,
-            label: "날짜",
+            enabled: false,
+            label: "Date",
             icon: "📅",
             prompt: "Infer the date from context (mentions of days, events, seasons, holidays, etc.). Write as 'Month/Day(DayOfWeek)' format (e.g., 12/25(Wed), 1/1(Mon)). If cannot be determined, write 'Unknown' or estimate based on context clues. If same as previous summary, maintain it."
         },
         time: {
             enabled: true,
-            label: "시간",
+            label: "Time",
             icon: "⏰",
             prompt: "Specify the time of day (dawn, night, etc.). If no change from previous summary, write same as previous."
         },
         relationship: {
             enabled: true,
-            label: "관계",
+            label: "Relationship",
             icon: "💕",
             prompt: "Define the current relationship between the two characters with a noun that best describes it. (e.g., neighbors, lovers) If a relationship was defined in previous summary, maintain it unless there's a clear change."
         }
@@ -139,7 +146,7 @@ export const defaultSettings = {
     
     // API 설정
     apiSource: API_SOURCE.SILLYTAVERN,
-    useRawPrompt: true,            // Raw 프롬프트 사용 (캐릭터 카드 제외)
+    useRawPrompt: true,            // Raw 프롬프트 사용 (캐릭터 카드 Scenario 제외)
     stConnectionProfile: "",       // SillyTavern Connection Manager 프로필 (빈 문자열 = 현재 연결 사용)
     customApiUrl: "",
     customApiKey: "",
@@ -172,6 +179,58 @@ export const defaultSettings = {
     
     // 카테고리 순서 (키 배열)
     categoryOrder: ["scenario", "emotion", "innerThoughts", "atmosphere", "location", "date", "time", "relationship"]
+};
+
+// ===== 언어별 지시 상수 =====
+// 요약 프롬프트에서 사용하는 언어 지시문 (중복 방지)
+
+export const LANG_INSTRUCTIONS = {
+    'ko': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT 🚨 ######
+**[절대 필수] 모든 출력은 반드시 한국어로 작성하세요.**
+- 요약 본문: 한국어
+- 대사 인용: 한국어
+- 카테고리 라벨: 한국어 (시나리오, 장소, 시간, 관계 등)
+##########################################`,
+    'en': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT 🚨 ######
+**[MANDATORY] Write EVERYTHING in English.**
+- Summary text: English
+- Dialogue quotes: Translate to English
+- Category labels: English
+DO NOT keep any non-English text. Translate ALL dialogue.
+##########################################`,
+    'ja': `###### 🚨 重要な言語要件 🚨 ######
+**【絶対必須】すべての出力は日本語で作成してください。**
+- 要約本文：日本語
+- 台詞引用：日本語に翻訳
+- カテゴリラベル：日本語
+##########################################`,
+    'hybrid': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT - HYBRID MODE 🚨 ######
+**[MANDATORY - READ CAREFULLY]**
+
+✅ SUMMARY/NARRATIVE TEXT → Write in **ENGLISH**
+   Example: "In the late evening, Han Do-yoon encountered Woo Min-jeong..."
+
+✅ DIALOGUE/QUOTES → Keep in **ORIGINAL LANGUAGE** (DO NOT TRANSLATE)
+   Example: If original is Korean "안녕하세요" → keep as "안녕하세요"
+   Example: If original is Japanese "こんにちは" → keep as "こんにちは"
+
+✅ CATEGORY LABELS → Write in **ENGLISH** (Location, Time, Relationship, etc.)
+
+⚠️ WRONG: Translating dialogue to English
+⚠️ WRONG: Writing narrative in Korean/Japanese
+✅ CORRECT: English narrative + Original language dialogue in quotes
+
+Example output:
+* Scenario: Do-yoon greeted her warmly, saying "어? 이제 오세요?" while hiding his true intentions.
+* Location: Villa Hallway
+##########################################`
+};
+
+export const LANG_REMINDERS = {
+    'ko': '\n🚨 **[최종 리마인더] 아래 출력을 반드시 한국어로 작성하세요!** 🚨\n',
+    'en': '\n🚨 **[FINAL REMINDER] Write ALL output below in ENGLISH! Translate all dialogue!** 🚨\n',
+    'ja': '\n🚨 **【最終リマインダー】以下の出力はすべて日本語で！** 🚨\n',
+    'hybrid': '\n🚨 **[FINAL REMINDER - HYBRID MODE]** 🚨\n**Narrative = ENGLISH | Dialogue in quotes = ORIGINAL LANGUAGE (한국어/日本語/etc.)**\nDO NOT translate the dialogue! Keep "quoted text" exactly as in source!\n'
 };
 
 // ===== 기본 프롬프트 템플릿 =====

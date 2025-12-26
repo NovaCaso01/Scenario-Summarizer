@@ -111,9 +111,9 @@
                     </div>
                 </div>
                 
-                <!-- 토큰 & 컨텍스트 설정 -->
+                <!-- 프롬프트 주입 설정 -->
                 <div class="summarizer-section">
-                    <h4><i class="fa-solid fa-database"></i> 토큰 & 컨텍스트</h4>
+                    <h4><i class="fa-solid fa-bolt"></i> 프롬프트 주입 설정</h4>
                     
                     <div class="summarizer-input-group">
                         <label for="summarizer-token-budget">토큰 예산</label>
@@ -122,10 +122,44 @@
                     </div>
                     
                     <div class="summarizer-input-group">
+                        <label for="summarizer-injection-position">주입 위치</label>
+                        <select id="summarizer-injection-position" class="summarizer-select">
+                            <option value="in-chat">In-Chat (채팅 내 지정 깊이)</option>
+                            <option value="before-main">Before Main Prompt (메인 프롬프트 전)</option>
+                            <option value="after-main">After Main Prompt (메인 프롬프트 후)</option>
+                        </select>
+                        <small class="summarizer-hint">요약이 AI 프롬프트에 주입되는 위치를 설정합니다</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group" id="injection-depth-container">
+                        <label for="summarizer-injection-depth">주입 깊이 (In-Chat 모드)</label>
+                        <input type="number" id="summarizer-injection-depth" min="0" max="100" step="1" value="0" />
+                        <small class="summarizer-hint">0 = 채팅 메시지 직전, 숫자가 클수록 채팅 메시지 사이로 깊게 삽입됩니다</small>
+                    </div>
+                </div>
+                
+                <!-- 요약 컨텍스트 -->
+                <div class="summarizer-section">
+                    <h4><i class="fa-solid fa-database"></i> 요약 컨텍스트</h4>
+                    
+                    <div class="summarizer-input-group">
+                        <div class="summarizer-toggle-row" style="padding-bottom: 0;">
+                            <span class="summarizer-toggle-label">
+                                월드인포 포함
+                                <small class="summarizer-hint">요약 시 월드인포를 참조합니다</small>
+                            </span>
+                            <label class="summarizer-toggle">
+                                <input type="checkbox" id="summarizer-include-worldinfo" />
+                                <span class="summarizer-toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
                         <div class="summarizer-toggle-row" style="padding-bottom: 0;">
                             <span class="summarizer-toggle-label">
                                 이전 요약 전체 참조
-                                <small class="summarizer-hint">켜면 모든 이전 요약을 참고합니다</small>
+                                <small class="summarizer-hint">새 요약 생성 시 모든 이전 요약을 참고하여 일관성을 유지합니다</small>
                             </span>
                             <label class="summarizer-toggle">
                                 <input type="checkbox" id="summarizer-context-all" />
@@ -153,7 +187,7 @@
                     
                     <div class="summarizer-radio-group">
                         <label class="summarizer-radio-item">
-                            <input type="radio" name="summary-mode" value="individual" checked />
+                            <input type="radio" name="summary-mode" value="individual" />
                             <span class="summarizer-radio-mark"></span>
                             <div class="summarizer-radio-content">
                                 <strong>개별 요약</strong>
@@ -162,7 +196,7 @@
                         </label>
                         
                         <label class="summarizer-radio-item">
-                            <input type="radio" name="summary-mode" value="batch" />
+                            <input type="radio" name="summary-mode" value="batch" checked />
                             <span class="summarizer-radio-mark"></span>
                             <div class="summarizer-radio-content">
                                 <strong>묶음 요약</strong>
@@ -171,9 +205,9 @@
                         </label>
                     </div>
                     
-                    <div class="summarizer-input-group" id="batch-group-size-container" style="display: none; margin-top: 16px;">
+                    <div class="summarizer-input-group" id="batch-group-size-container" style="margin-top: 16px;">
                         <label for="summarizer-batch-group-size">묶음 크기</label>
-                        <input type="number" id="summarizer-batch-group-size" min="2" max="50" step="1" value="10" />
+                        <input type="number" id="summarizer-batch-group-size" min="2" max="50" step="1" value="5" />
                         <small class="summarizer-hint">한 요약에 묶을 메시지 수 (예: 5 → #1~5, #6~10 각각 하나의 요약)</small>
                     </div>
                     
@@ -765,22 +799,30 @@
                         <div class="summarizer-prompt-structure-item editable">
                             <div class="summarizer-structure-header">
                                 <span class="summarizer-structure-number">2</span>
-                                <span class="summarizer-structure-label">요약 지침</span>
+                                <span class="summarizer-structure-label">사용자 작성 지침</span>
                                 <span class="summarizer-structure-edit">수정 가능</span>
                             </div>
-                            <span class="summarizer-structure-desc">위에서 작성한 사용자 지침</span>
+                            <span class="summarizer-structure-desc">위에서 작성한 요약 지침</span>
                         </div>
                         <div class="summarizer-prompt-structure-item">
                             <div class="summarizer-structure-header">
                                 <span class="summarizer-structure-number">3</span>
-                                <span class="summarizer-structure-label">이전 상태</span>
+                                <span class="summarizer-structure-label">프로필 정보</span>
                                 <span class="summarizer-structure-auto">자동</span>
                             </div>
-                            <span class="summarizer-structure-desc">이전 요약의 시간/장소/관계 (연속성 유지)</span>
+                            <span class="summarizer-structure-desc">캐릭터 카드, 페르소나, 월드인포</span>
                         </div>
                         <div class="summarizer-prompt-structure-item">
                             <div class="summarizer-structure-header">
                                 <span class="summarizer-structure-number">4</span>
+                                <span class="summarizer-structure-label">이전 요약</span>
+                                <span class="summarizer-structure-auto">자동</span>
+                            </div>
+                            <span class="summarizer-structure-desc">이전 요약 내용 (연속성 유지)</span>
+                        </div>
+                        <div class="summarizer-prompt-structure-item">
+                            <div class="summarizer-structure-header">
+                                <span class="summarizer-structure-number">5</span>
                                 <span class="summarizer-structure-label">기존 등장인물</span>
                                 <span class="summarizer-structure-auto">자동</span>
                             </div>
@@ -788,7 +830,7 @@
                         </div>
                         <div class="summarizer-prompt-structure-item">
                             <div class="summarizer-structure-header">
-                                <span class="summarizer-structure-number">5</span>
+                                <span class="summarizer-structure-number">6</span>
                                 <span class="summarizer-structure-label">요약할 메시지</span>
                                 <span class="summarizer-structure-auto">자동</span>
                             </div>
@@ -796,11 +838,19 @@
                         </div>
                         <div class="summarizer-prompt-structure-item">
                             <div class="summarizer-structure-header">
-                                <span class="summarizer-structure-number">6</span>
+                                <span class="summarizer-structure-number">7</span>
                                 <span class="summarizer-structure-label">출력 형식</span>
                                 <span class="summarizer-structure-auto">자동</span>
                             </div>
                             <span class="summarizer-structure-desc">파싱용 형식 (카테고리, 캐릭터 JSON)</span>
+                        </div>
+                        <div class="summarizer-prompt-structure-item">
+                            <div class="summarizer-structure-header">
+                                <span class="summarizer-structure-number">8</span>
+                                <span class="summarizer-structure-label">캐릭터 추출 블록</span>
+                                <span class="summarizer-structure-auto">자동</span>
+                            </div>
+                            <span class="summarizer-structure-desc">새 등장인물 자동 추출 지침</span>
                         </div>
                     </div>
                 </div>

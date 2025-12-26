@@ -46,12 +46,12 @@ async function onChatChanged() {
     clearMessageElementCache();
     
     // 가시성 적용
-    setTimeout(() => {
+    setTimeout(async () => {
         applyMessageVisibility();
         
         // 활성화 상태면 주입
         if (settings.enabled) {
-            injectSummaryToPrompt();
+            await injectSummaryToPrompt();
         } else {
             clearInjection();
         }
@@ -162,7 +162,7 @@ async function onMessageSwiped(messageId) {
     await saveSummaryData();
     
     // 주입 갱신
-    injectSummaryToPrompt();
+    await injectSummaryToPrompt();
     triggerStatusUpdate();
 }
 
@@ -179,7 +179,7 @@ async function onMessageDeleted(messageId) {
     await saveSummaryData();
     
     // 주입 갱신
-    injectSummaryToPrompt();
+    await injectSummaryToPrompt();
     triggerStatusUpdate();
 }
 
@@ -194,7 +194,7 @@ async function onBeforeGeneration() {
     }
     
     // 생성 전에 요약 주입 갱신
-    injectSummaryToPrompt();
+    await injectSummaryToPrompt();
 }
 
 // 이벤트 리스너 등록 상태
@@ -263,12 +263,12 @@ export function unregisterEventListeners() {
 /**
  * 설정에 따라 이벤트 리스너 업데이트
  */
-export function updateEventListeners() {
+export async function updateEventListeners() {
     const settings = getSettings();
     
     if (settings.enabled) {
         registerEventListeners();
-        injectSummaryToPrompt();
+        await injectSummaryToPrompt();
     } else {
         // 비활성화 시에도 기본 리스너는 유지 (채팅 변경 감지용)
         // 대신 주입만 제거

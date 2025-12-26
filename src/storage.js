@@ -5,7 +5,7 @@
 import { getContext, extension_settings } from "../../../../extensions.js";
 import { saveChatConditional } from "../../../../../script.js";
 import { extensionName, METADATA_KEY, DATA_VERSION } from './constants.js';
-import { log, getSettings } from './state.js';'./state.js';
+import { log, getSettings } from './state.js';
 
 /**
  * 요약 데이터 가져오기 (없으면 초기화)

@@ -1203,6 +1203,7 @@
 
 .summarizer-add-category-row input {
     flex: 1;
+    min-width: 0; /* flex 아이템이 컸테이너를 벗어나지 않도록 */
     padding: 10px 12px;
     background: var(--sum-bg-input);
     border: 1px solid var(--sum-border);

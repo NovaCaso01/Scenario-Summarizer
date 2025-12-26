@@ -34,7 +34,7 @@ let getTokenCountAsync = null;
 /**
  * 토큰 카운터 함수 초기화
  */
-async function initTokenCounter() {
+export async function initTokenCounter() {
     if (getTokenCountAsync) return;
     
     try {
@@ -55,6 +55,14 @@ async function initTokenCounter() {
 }
 
 /**
+ * 토큰 카운터 함수 가져오기 (외부 모듈에서 사용)
+ * @returns {Function|null}
+ */
+export function getTokenCounter() {
+    return getTokenCountAsync;
+}
+
+/**
  * 설정 저장
  */
 function saveSettings() {
@@ -69,6 +77,18 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+/**
+ * 주입 깊이 설정 표시/숨김
+ */
+function toggleInjectionDepthVisibility() {
+    const position = $("#summarizer-injection-position").val();
+    if (position === "in-chat") {
+        $("#injection-depth-container").show();
+    } else {
+        $("#injection-depth-container").hide();
+    }
 }
 
 /**
@@ -189,8 +209,16 @@ export function updateUIFromSettings() {
     // Auto-Hide
     $("#summarizer-auto-hide").prop("checked", settings.autoHideEnabled);
     
+    // 월드인포 포함
+    $("#summarizer-include-worldinfo").prop("checked", settings.includeWorldInfo !== false);
+    
     // 등장인물 추적
     $("#summarizer-character-tracking").prop("checked", settings.characterTrackingEnabled !== false);
+    
+    // 주입 위치 설정
+    $("#summarizer-injection-position").val(settings.injectionPosition || "in-chat");
+    $("#summarizer-injection-depth").val(settings.injectionDepth !== undefined ? settings.injectionDepth : 0);
+    toggleInjectionDepthVisibility();
     
     // 토큰 예산
     $("#summarizer-token-budget").val(settings.tokenBudget || 20000);
@@ -801,7 +829,7 @@ function bindEntryEvents() {
         
         setSummaryForMessage(idx, newContent);
         await saveSummaryData();
-        injectSummaryToPrompt();
+        await injectSummaryToPrompt();
         
         showToast('success', `#${idx} 요약이 수정되었습니다.`);
         await renderSummaryList();
@@ -860,7 +888,7 @@ function bindEntryEvents() {
         
         deleteSummaryForMessage(idx);
         await saveSummaryData();
-        injectSummaryToPrompt();
+        await injectSummaryToPrompt();
         applyMessageVisibility();
         
         showToast('success', `#${idx} 요약이 삭제되었습니다.`);
@@ -962,7 +990,7 @@ export function doImport() {
             
             if (success) {
                 await saveSummaryData();
-                injectSummaryToPrompt();
+                await injectSummaryToPrompt();
                 applyMessageVisibility();
                 updateStatusDisplay();
                 showToast('success', '요약을 가져왔습니다.');
@@ -1854,10 +1882,10 @@ export function bindUIEvents() {
     });
     
     // 설정 탭
-    $("#summarizer-enabled").on("change", function() {
+    $("#summarizer-enabled").on("change", async function() {
         settings.enabled = $(this).prop("checked");
         saveSettings();
-        updateEventListeners();
+        await updateEventListeners();
     });
     
     $("#summarizer-automatic").on("change", function() {
@@ -1894,6 +1922,11 @@ export function bindUIEvents() {
         settings.autoHideEnabled = $(this).prop("checked");
         saveSettings();
         applyMessageVisibility();
+    });
+    
+    $("#summarizer-include-worldinfo").on("change", function() {
+        settings.includeWorldInfo = $(this).prop("checked");
+        saveSettings();
     });
     
     $("#summarizer-character-tracking").on("change", function() {
@@ -1973,6 +2006,32 @@ export function bindUIEvents() {
     // 요약 언어
     $("#summarizer-language").on("change", function() {
         settings.summaryLanguage = $(this).val();
+        saveSettings();
+    });
+    
+    // 주입 위치 설정
+    $("#summarizer-injection-position").on("change", function() {
+        settings.injectionPosition = $(this).val();
+        saveSettings();
+        toggleInjectionDepthVisibility();
+    });
+    
+    $("#summarizer-injection-depth").on("change", function() {
+        let value = parseInt($(this).val());
+        if (isNaN(value) || value < 0) value = 0;
+        if (value > 100) value = 100;
+        $(this).val(value);
+        settings.injectionDepth = value;
+        saveSettings();
+    });
+    
+    $("#summarizer-injection-template").on("change", function() {
+        const template = $(this).val();
+        if (!template.includes("{{summary}}")) {
+            showToast('warning', '주입 템플릿에 {{summary}} 매크로가 필요합니다');
+            return;
+        }
+        settings.injectionTemplate = template;
         saveSettings();
     });
     
@@ -2084,7 +2143,7 @@ export function bindUIEvents() {
     
     // 클립보드 복사
     $("#summarizer-copy-to-clipboard").on("click", async function() {
-        const preview = getInjectionPreview();
+        const preview = await getInjectionPreview();
         try {
             // 기본 Clipboard API 시도
             if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -2292,10 +2351,25 @@ async function exportCharactersToClipboard() {
     const text = formatCharactersText();
     
     try {
-        await navigator.clipboard.writeText(text);
-        showToast('success', '등장인물 정보가 복사되었습니다!');
+        // 기본 Clipboard API 시도
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+            await navigator.clipboard.writeText(text);
+            showToast('success', '등장인물 정보가 복사되었습니다!');
+        } else {
+            // 폴백: execCommand 사용
+            if (copyTextFallback(text)) {
+                showToast('success', '등장인물 정보가 복사되었습니다!');
+            } else {
+                showToast('error', '복사 실패: 브라우저가 클립보드 접근을 지원하지 않습니다');
+            }
+        }
     } catch (error) {
-        showToast('error', '복사 실패');
+        // 폴백: execCommand 사용
+        if (copyTextFallback(text)) {
+            showToast('success', '등장인물 정보가 복사되었습니다!');
+        } else {
+            showToast('error', `복사 실패: ${error.message}`, { error, context: 'exportCharactersToClipboard' });
+        }
     }
 }
 

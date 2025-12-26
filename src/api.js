@@ -119,13 +119,13 @@ async function callSillyTavernAPI(prompt) {
         let result;
         
         if (settings.useRawPrompt && typeof generateRaw === 'function') {
-            // Raw 프롬프트: 캐릭터 카드, 채팅 히스토리 제외
-            // 새로운 객체 기반 API 사용
+            // Raw 프롬프트: 채팅 히스토리 제외, 월드인포 포함 여부는 설정에 따름
             result = await generateRaw({
                 prompt: prompt,
                 maxContext: null,
                 quietToLoud: false,
-                skipWIAN: false,
+                skipWIAN: !settings.includeWorldInfo,
+                skipAN: true,
                 quietImage: null,
                 quietName: null
             });

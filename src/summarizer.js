@@ -10,7 +10,9 @@ import {
     DEFAULT_BATCH_PROMPT_TEMPLATE,
     CHARACTER_EXTRACTION_BLOCKS,
     CHARACTER_OUTPUT_FORMAT,
-    getCharacterJsonCleanupPattern
+    getCharacterJsonCleanupPattern,
+    LANG_INSTRUCTIONS,
+    LANG_REMINDERS
 } from './constants.js';
 import { log, getSettings, startSummarizing, stopSummarizing, shouldStop, isSummarizing, logError } from './state.js';
 import { getSummaryData, saveSummaryData, setSummaryForMessage, formatCharactersText, mergeExtractedCharacters, getPreviousContext, getRecentSummariesForContext } from './storage.js';
@@ -100,19 +102,17 @@ function parseFallback(text, startNum, endNum) {
 /**
  * SillyTavern에서 프로필 정보 가져오기 (캐릭터 카드, 페르소나, 월드인포)
  * 요약 시 캐릭터와 유저의 컨텍스트 정보를 제공
+ * @param {boolean} isRawPrompt - raw 프롬프트 모드 여부 (true면 캐릭터 Scenario 제외)
  * @returns {string} - 프로필 정보 텍스트
  */
-function getProfileInfo() {
+function getProfileInfo(isRawPrompt = false) {
     const context = getContext();
     if (!context) return '';
     
-    // Profile info (character card, user persona, world info) is always included as context for summarization
-    
     let profileText = '';
     
-    // 1. Character Card Info (from context.characters for current character)
+    // 1. 캐릭터 카드 정보
     try {
-        // Get current character info from characterData or characters
         let charData = null;
         if (context.characterId !== undefined && context.characters && context.characters[context.characterId]) {
             charData = context.characters[context.characterId];
@@ -125,18 +125,17 @@ function getProfileInfo() {
             if (charData.name) profileText += `* Name: ${charData.name}\n`;
             if (charData.description) profileText += `* Description: ${charData.description}\n`;
             if (charData.personality) profileText += `* Personality: ${charData.personality}\n`;
-            if (charData.scenario) profileText += `* Scenario: ${charData.scenario}\n`;
-            // Greeting (first_mes) and example dialogue (mes_example) are excluded as unnecessary for summarization
+            // Raw 모드일 때는 Scenario 제외 (World Info에서 가져오므로 중복 방지)
+            if (!isRawPrompt && charData.scenario) profileText += `* Scenario: ${charData.scenario}\n`;
             profileText += '\n';
         }
     } catch (e) {
         log(`Failed to get character data: ${e.message}`);
     }
     
-    // 2. Persona Info (User Persona) - from power_user
+    // 2. 유저 페르소나 정보
     try {
         const userName = context.name1 || '';
-        // Get current persona description from power_user.persona_description
         const userPersona = power_user?.persona_description || '';
         
         if (userName || userPersona) {
@@ -149,8 +148,7 @@ function getProfileInfo() {
         log(`Failed to get persona data: ${e.message}`);
     }
     
-    // 3. World Info / Lorebook
-    // Property names may vary by SillyTavern API version (worldInfo/world_info, content/entry, keys/key)
+    // 3. 월드인포 / 로어북
     try {
         const worldInfo = context.worldInfo || context.world_info || [];
         
@@ -187,49 +185,6 @@ export function buildSummaryPrompt(messages, startIndex) {
     const cats = settings.categories || {};
     const language = settings.summaryLanguage || 'ko';
     
-    // 언어 설정 - 매우 강력한 지시
-    const langInstructions = {
-        'ko': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT 🚨 ######
-**[절대 필수] 모든 출력은 반드시 한국어로 작성하세요.**
-- 요약 본문: 한국어
-- 대사 인용: 한국어
-- 카테고리 라벨: 한국어 (시나리오, 장소, 시간, 관계 등)
-##########################################`,
-        'en': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT 🚨 ######
-**[MANDATORY] Write EVERYTHING in English.**
-- Summary text: English
-- Dialogue quotes: Translate to English
-- Category labels: English
-DO NOT keep any non-English text. Translate ALL dialogue.
-##########################################`,
-        'ja': `###### 🚨 重要な言語要件 🚨 ######
-**【絶対必須】すべての出力は日本語で作成してください。**
-- 要約本文：日本語
-- 台詞引用：日本語に翻訳
-- カテゴリラベル：日本語
-##########################################`,
-        'hybrid': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT - HYBRID MODE 🚨 ######
-**[MANDATORY - READ CAREFULLY]**
-
-✅ SUMMARY/NARRATIVE TEXT → Write in **ENGLISH**
-   Example: "In the late evening, Han Do-yoon encountered Woo Min-jeong..."
-
-✅ DIALOGUE/QUOTES → Keep in **ORIGINAL LANGUAGE** (DO NOT TRANSLATE)
-   Example: If original is Korean "안녕하세요" → keep as "안녕하세요"
-   Example: If original is Japanese "こんにちは" → keep as "こんにちは"
-
-✅ CATEGORY LABELS → Write in **ENGLISH** (Location, Time, Relationship, etc.)
-
-⚠️ WRONG: Translating dialogue to English
-⚠️ WRONG: Writing narrative in Korean/Japanese
-✅ CORRECT: English narrative + Original language dialogue in quotes
-
-Example output:
-* Scenario: Do-yoon greeted her warmly, saying "어? 이제 오세요?" while hiding his true intentions.
-* Location: Villa Hallway
-##########################################`
-    };
-    
     // 메시지 포맷팅 (0-indexed)
     const formattedMessages = messages.map((msg, idx) => {
         const speaker = msg.name || (msg.is_user ? "User" : "Character");
@@ -265,7 +220,7 @@ Example output:
     REGEX_PREV_RELATIONSHIP.lastIndex = 0;
     
     // 언어 지시
-    const langInstruction = langInstructions[language] || langInstructions['ko'];
+    const langInstruction = LANG_INSTRUCTIONS[language] || LANG_INSTRUCTIONS['ko'];
     
     // 이전 컨텍스트 정보 추가 (프롬프트에 직접 전달 - 최소 정보, 항상 포함)
     const contextInfo = `
@@ -284,20 +239,16 @@ ${recentSummaries}
 ` : '';
     
     // 프로필 정보 가져오기 (캐릭터 카드/페르소나/월드인포)
-    const profileInfo = getProfileInfo();
+    // raw 프롬프트 모드인지 확인
+    const isRawPrompt = settings.useRawPrompt || false;
+    const profileInfo = getProfileInfo(isRawPrompt);
     const profileSection = profileInfo ? `
 ## Reference Info (Character Card/Persona/World Info)
 ${profileInfo}
 ` : '';
     
     // 언어별 추가 리마인더 (출력 형식 앞에 추가) - 매우 강력
-    const langReminders = {
-        'ko': '\n🚨 **[최종 리마인더] 아래 출력을 반드시 한국어로 작성하세요!** 🚨\n',
-        'en': '\n🚨 **[FINAL REMINDER] Write ALL output below in ENGLISH! Translate all dialogue!** 🚨\n',
-        'ja': '\n🚨 **【最終リマインダー】以下の出力はすべて日本語で！** 🚨\n',
-        'hybrid': '\n🚨 **[FINAL REMINDER - HYBRID MODE]** 🚨\n**Narrative = ENGLISH | Dialogue in quotes = ORIGINAL LANGUAGE (한국어/日本語/etc.)**\nDO NOT translate the dialogue! Keep "quoted text" exactly as in source!\n'
-    };
-    const langReminder = langReminders[language] || langReminders['ko'];
+    const langReminder = LANG_REMINDERS[language] || LANG_REMINDERS['ko'];
     
     // 최종 프롬프트 조립: 언어 + 지침 + 프로필정보 + 이전컨텍스트 + 이전요약 + 기존캐릭터 + 메시지 + 출력형식
     const prompt = `${langInstruction}
@@ -392,48 +343,8 @@ export function buildBatchGroupsPrompt(groups, settings) {
     const cats = settings.categories || {};
     const language = settings.summaryLanguage || 'ko';
     
-    // 언어 설정 - 매우 강력한 지시
-    const langInstructions = {
-        'ko': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT 🚨 ######
-**[절대 필수] 모든 출력은 반드시 한국어로 작성하세요.**
-- 요약 본문: 한국어
-- 대사 인용: 한국어
-- 카테고리 라벨: 한국어 (시나리오, 장소, 시간, 관계 등)
-##########################################`,
-        'en': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT 🚨 ######
-**[MANDATORY] Write EVERYTHING in English.**
-- Summary text: English
-- Dialogue quotes: Translate to English
-- Category labels: English
-DO NOT keep any non-English text. Translate ALL dialogue.
-##########################################`,
-        'ja': `###### 🚨 重要な言語要件 🚨 ######
-**【絶対必須】すべての出力は日本語で作成してください。**
-- 要約本文：日本語
-- 台詞引用：日本語に翻訳
-- カテゴリラベル：日本語
-##########################################`,
-        'hybrid': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT - HYBRID MODE 🚨 ######
-**[MANDATORY - READ CAREFULLY]**
-
-✅ SUMMARY/NARRATIVE TEXT → Write in **ENGLISH**
-   Example: "In the late evening, Han Do-yoon encountered Woo Min-jeong..."
-
-✅ DIALOGUE/QUOTES → Keep in **ORIGINAL LANGUAGE** (DO NOT TRANSLATE)
-   Example: If original is Korean "안녕하세요" → keep as "안녕하세요"
-   Example: If original is Japanese "こんにちは" → keep as "こんにちは"
-
-✅ CATEGORY LABELS → Write in **ENGLISH** (Location, Time, Relationship, etc.)
-
-⚠️ WRONG: Translating dialogue to English
-⚠️ WRONG: Writing narrative in Korean/Japanese
-✅ CORRECT: English narrative + Original language dialogue in quotes
-
-Example output:
-* Scenario: Do-yoon greeted her warmly, saying "어? 이제 오세요?" while hiding his true intentions.
-* Location: Villa Hallway
-##########################################`
-    };
+    // 언어 설정 - 상수에서 가져옴
+    const langInstruction = LANG_INSTRUCTIONS[language] || LANG_INSTRUCTIONS['ko'];
     
     // 카테고리별 출력 형식 (순서 적용)
     const categoryFormat = buildCategoryFormat(cats, settings.categoryOrder);
@@ -481,9 +392,6 @@ Example output:
     REGEX_PREV_LOCATION.lastIndex = 0;
     REGEX_PREV_RELATIONSHIP.lastIndex = 0;
     
-    // 언어 지시
-    const langInstruction = langInstructions[language] || langInstructions['ko'];
-    
     // 이전 컨텍스트 정보 추가 (프롬프트에 직접 전달 - 최소 정보, 항상 포함)
     const contextInfo = `
 ## Previous Summary State (for continuity)
@@ -504,20 +412,16 @@ ${recentSummaries}
     const outputFormatExample = categoryFormat || '* Scenario: (Integrate key events and dialogue narratively)';
     
     // 프로필 정보 가져오기 (캐릭터 카드/페르소나/월드인포)
-    const profileInfo = getProfileInfo();
+    // raw 프롬프트 모드인지 확인
+    const isRawPrompt = settings.useRawPrompt || false;
+    const profileInfo = getProfileInfo(isRawPrompt);
     const profileSection = profileInfo ? `
 ## Reference Info (Character Card/Persona/World Info)
 ${profileInfo}
 ` : '';
     
     // 언어별 추가 리마인더 (출력 형식 앞에 추가) - 매우 강력
-    const langReminders = {
-        'ko': '\n🚨 **[최종 리마인더] 아래 출력을 반드시 한국어로 작성하세요!** 🚨\n',
-        'en': '\n🚨 **[FINAL REMINDER] Write ALL output below in ENGLISH! Translate all dialogue!** 🚨\n',
-        'ja': '\n🚨 **【最終リマインダー】以下の出力はすべて日本語で！** 🚨\n',
-        'hybrid': '\n🚨 **[FINAL REMINDER - HYBRID MODE]** 🚨\n**Narrative = ENGLISH | Dialogue in quotes = ORIGINAL LANGUAGE (한국어/日本語/etc.)**\nDO NOT translate the dialogue! Keep "quoted text" exactly as in source!\n'
-    };
-    const langReminder = langReminders[language] || langReminders['ko'];
+    const langReminder = LANG_REMINDERS[language] || LANG_REMINDERS['ko'];
     
     // 최종 프롬프트 조립: 언어 + 지침 + 프로필정보 + 이전컨텍스트 + 이전요약 + 등장인물 + 메시지 + 출력형식
     const prompt = `${langInstruction}
@@ -897,7 +801,7 @@ export async function runSummary(customStart = null, customEnd = null, onProgres
     } catch (error) {
         stopSummarizing();
         log(`Summary error: ${error.message}`);
-        logError('runSummary', error, { startIndex, endIndex, batchSize });
+        logError('runSummary', error, { customStart, customEnd });
         return { success: false, processed: 0, error: error.message };
     }
 }

@@ -1,5 +1,5 @@
 /**
- * 시나리오 자동요약 확장 프로그램 v1.02
+ * 시나리오 자동요약 확장 프로그램 v1.03
  * SillyTavern 네이티브 확장 - chatMetadata 저장 방식
  * 
  * 주요 기능:
@@ -21,7 +21,7 @@ import { registerEventListeners, updateEventListeners, setStatusUpdateCallback }
 import { applyMessageVisibility } from './src/visibility.js';
 import { injectSummaryToPrompt } from './src/injection.js';
 import { 
-    openPopup, closePopup, bindUIEvents, updateStatusDisplay, updateUIFromSettings, updateApiDisplay 
+    openPopup, closePopup, bindUIEvents, updateStatusDisplay, updateUIFromSettings, updateApiDisplay, initTokenCounter 
 } from './src/ui.js';
 
 /**
@@ -152,6 +152,9 @@ async function init() {
     // UI 이벤트 바인딩
     bindUIEvents();
     
+    // 토큰 카운터 초기화
+    await initTokenCounter();
+    
     // 상태 업데이트 콜백 설정
     setStatusUpdateCallback(() => {
         updateStatusDisplay();
@@ -179,11 +182,11 @@ jQuery(async () => {
         await init();
         
         // 초기 주입 (채팅이 있는 경우)
-        setTimeout(() => {
+        setTimeout(async () => {
             const settings = extension_settings[extensionName];
             if (settings.enabled) {
                 applyMessageVisibility();
-                injectSummaryToPrompt();
+                await injectSummaryToPrompt();
                 updateStatusDisplay();
             }
         }, 1000);
