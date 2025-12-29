@@ -116,7 +116,7 @@ export async function injectSummaryToPrompt() {
     // 최신 것부터 추가하여 토큰 초과 시 오래된 요약이 제외되도록
     for (const index of summaryIndices) {
         const summary = summaries[index];
-        const content = summary.content || '';
+        const content = String(summary?.content ?? summary ?? '');
         
         // 그룹 요약에 포함된 항목은 건너뛰기
         if (content.startsWith('[\u2192') || content.includes('그룹 요약에 포함')) {
@@ -124,7 +124,7 @@ export async function injectSummaryToPrompt() {
         }
         
         // 무효화된 요약은 건너뛰기
-        if (summary.invalidated === true) {
+        if (summary?.invalidated === true) {
             continue;
         }
         
@@ -226,7 +226,7 @@ export async function getInjectionPreview() {
     
     for (const index of summaryIndices) {
         const summary = summaries[index];
-        const content = summary.content || '';
+        const content = String(summary?.content ?? summary ?? '');
         
         // 그룹 요약에 포함된 항목은 건너뛰기
         if (content.startsWith('[\u2192') || content.includes('그룹 요약에 포함')) {

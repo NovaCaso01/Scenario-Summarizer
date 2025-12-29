@@ -650,7 +650,8 @@ async function renderSummaryList() {
     
     // 그룹 요약에 포함된 항목은 목록에서 제외
     const indices = allIndices.filter(index => {
-        const content = summaries[index]?.content || '';
+        const summary = summaries[index];
+        const content = String(summary?.content ?? summary ?? '');
         return !content.startsWith('[→') && !content.includes('그룹 요약에 포함');
     });
     
@@ -676,7 +677,8 @@ async function renderSummaryList() {
     // 모든 요약 내용을 하나의 텍스트로 합치기
     let allContent = '';
     for (const index of allIndices) {
-        const content = summaries[index]?.content || '';
+        const summary = summaries[index];
+        const content = String(summary?.content ?? summary ?? '');
         if (!content.startsWith('[→') && !content.includes('그룹 요약에 포함')) {
             allContent += content + '\n';
         }
@@ -695,13 +697,13 @@ async function renderSummaryList() {
     
     for (const index of pageIndices) {
         const summary = summaries[index];
-        const content = summary.content || '';
-        const isInvalidated = summary.invalidated === true;
-        const invalidReason = summary.invalidReason || '';
+        const content = String(summary?.content ?? summary ?? '');
+        const isInvalidated = summary?.invalidated === true;
+        const invalidReason = summary?.invalidReason || '';
         
         // 날짜(요일) 포맷팅
         let dateDisplay = '';
-        if (summary.timestamp) {
+        if (summary?.timestamp) {
             const date = new Date(summary.timestamp);
             const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
             const month = date.getMonth() + 1;

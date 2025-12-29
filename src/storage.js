@@ -442,7 +442,7 @@ export function searchSummaries(query) {
     const lowerQuery = query.toLowerCase();
     
     for (const [index, summary] of Object.entries(summaries)) {
-        const content = summary.content || '';
+        const content = String(summary?.content ?? summary ?? '');
         if (content.toLowerCase().includes(lowerQuery)) {
             results.push({
                 messageIndex: parseInt(index),
@@ -705,11 +705,13 @@ export function getRecentSummariesForContext(beforeIndex, count) {
     // 그룹 요약에 포함된 항목 제외
     const summaryTexts = indicesToUse
         .filter(idx => {
-            const content = data.summaries[idx]?.content || '';
+            const summary = data.summaries[idx];
+            const content = String(summary?.content ?? summary ?? '');
             return !content.startsWith('[→') && !content.includes('그룹 요약에 포함');
         })
         .map(idx => {
-            const content = data.summaries[idx]?.content || '';
+            const summary = data.summaries[idx];
+            const content = String(summary?.content ?? summary ?? '');
             return content;
         });
     
