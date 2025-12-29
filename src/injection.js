@@ -5,7 +5,7 @@
 import { getContext, extension_settings } from "../../../../extensions.js";
 import { setExtensionPrompt, extension_prompt_types } from "../../../../../script.js";
 import { extensionName, getCharacterJsonCleanupPattern } from './constants.js';
-import { log, getSettings } from './state.js';
+import { log, getSettings, logError } from './state.js';
 import { getSummaryData, getRelevantSummaries, getCharacterName, getRelevantCharacters, formatCharactersText } from './storage.js';
 import { getTokenCounter } from './ui.js';
 
@@ -76,33 +76,34 @@ function safeSetExtensionPrompt(summaryContent, settings = null) {
  * 요약을 프롬프트에 주입
  */
 export async function injectSummaryToPrompt() {
-    const settings = getSettings();
-    
-    // 비활성화면 주입 제거
-    if (!settings.enabled) {
-        safeSetExtensionPrompt('', settings);
-        return;
-    }
-    
-    const context = getContext();
-    if (!context.chat || context.chat.length === 0) {
-        safeSetExtensionPrompt('', settings);
-        return;
-    }
-    
-    const summaries = getRelevantSummaries();
-    // 최신순(내림차순)으로 정렬하여 토큰 초과 시 오래된 요약이 제외되도록 함
-    const summaryIndices = Object.keys(summaries).map(Number).sort((a, b) => b - a);
-    
-    if (summaryIndices.length === 0) {
-        safeSetExtensionPrompt('', settings);
-        return;
-    }
-    
-    const charName = getCharacterName();
-    const data = getSummaryData();
-    const tokenBudget = settings.tokenBudget || 2000;
-    const getTokenCountAsync = getTokenCounter();
+    try {
+        const settings = getSettings();
+        
+        // 비활성화면 주입 제거
+        if (!settings.enabled) {
+            safeSetExtensionPrompt('', settings);
+            return;
+        }
+        
+        const context = getContext();
+        if (!context.chat || context.chat.length === 0) {
+            safeSetExtensionPrompt('', settings);
+            return;
+        }
+        
+        const summaries = getRelevantSummaries();
+        // 최신순(내림차순)으로 정렬하여 토큰 초과 시 오래된 요약이 제외되도록 함
+        const summaryIndices = Object.keys(summaries).map(Number).sort((a, b) => b - a);
+        
+        if (summaryIndices.length === 0) {
+            safeSetExtensionPrompt('', settings);
+            return;
+        }
+        
+        const charName = getCharacterName();
+        const data = getSummaryData();
+        const tokenBudget = settings.tokenBudget || 2000;
+        const getTokenCountAsync = getTokenCounter();
     
     // 토큰 예산 내에서 요약 구성
     let summaryText = `[${charName} 시나리오 요약]\n`;
@@ -187,6 +188,13 @@ export async function injectSummaryToPrompt() {
     if (success) {
         log(`Summary injected: ${includedCount} entries, ~${Math.round(estimatedTokens)} tokens`);
     }
+    } catch (error) {
+        logError('injectSummaryToPrompt', error, { 
+            hasSettings: !!getSettings(),
+            summariesCount: Object.keys(getRelevantSummaries() || {}).length
+        });
+        log(`Injection failed: ${error.message}`);
+    }
 }
 
 /**
@@ -203,19 +211,20 @@ export function clearInjection() {
  * @returns {Promise<string>}
  */
 export async function getInjectionPreview() {
-    const settings = getSettings();
-    const summaries = getRelevantSummaries();
-    // 최신순(내림차순)으로 정렬하여 토큰 초과 시 오래된 요약이 제외되도록 함
-    const summaryIndices = Object.keys(summaries).map(Number).sort((a, b) => b - a);
-    
-    if (summaryIndices.length === 0) {
-        return "(주입할 요약 없음)";
-    }
-    
-    const charName = getCharacterName();
-    const data = getSummaryData();
-    const tokenBudget = settings.tokenBudget || 2000;
-    const getTokenCountAsync = getTokenCounter();
+    try {
+        const settings = getSettings();
+        const summaries = getRelevantSummaries();
+        // 최신순(내림차순)으로 정렬하여 토큰 초과 시 오래된 요약이 제외되도록 함
+        const summaryIndices = Object.keys(summaries).map(Number).sort((a, b) => b - a);
+        
+        if (summaryIndices.length === 0) {
+            return "(주입할 요약 없음)";
+        }
+        
+        const charName = getCharacterName();
+        const data = getSummaryData();
+        const tokenBudget = settings.tokenBudget || 2000;
+        const getTokenCountAsync = getTokenCounter();
     
     let text = `[${charName} 시나리오 요약]\n`;
     text += `${"=".repeat(40)}\n\n`;
@@ -277,4 +286,8 @@ export async function getInjectionPreview() {
     }
     
     return text;
+    } catch (error) {
+        logError('getInjectionPreview', error);
+        return `(미리보기 생성 실패: ${error.message})`;
+    }
 }

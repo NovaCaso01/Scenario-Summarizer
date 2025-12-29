@@ -2170,3 +2170,72 @@
 #summarizer-preset-name {
     margin-top: var(--summarizer-spacing-sm);
 }
+
+/* ===== 에러 로그 섹션 ===== */
+.summarizer-error-log {
+    margin-top: var(--summarizer-spacing-md);
+    padding: var(--summarizer-spacing-md);
+    background: var(--sum-bg-secondary);
+    border: 1px solid var(--sum-border);
+    border-radius: var(--summarizer-radius-md);
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.summarizer-error-item {
+    padding: var(--summarizer-spacing-md);
+    background: var(--sum-bg-input);
+    border: 1px solid var(--sum-danger);
+    border-left: 4px solid var(--sum-danger);
+    border-radius: var(--summarizer-radius-sm);
+    margin-bottom: var(--summarizer-spacing-md);
+    font-size: 12px;
+}
+
+.summarizer-error-item:last-child {
+    margin-bottom: 0;
+}
+
+.summarizer-error-time {
+    font-size: 11px;
+    color: var(--sum-text-muted);
+    margin-bottom: var(--summarizer-spacing-xs);
+}
+
+.summarizer-error-context {
+    font-weight: 600;
+    color: var(--sum-danger);
+    margin-bottom: var(--summarizer-spacing-xs);
+}
+
+.summarizer-error-message {
+    color: var(--sum-text-primary);
+    margin-bottom: var(--summarizer-spacing-xs);
+    word-break: break-word;
+}
+
+.summarizer-error-details {
+    margin-top: var(--summarizer-spacing-sm);
+    padding: var(--summarizer-spacing-sm);
+    background: var(--sum-bg-secondary);
+    border-radius: var(--summarizer-radius-sm);
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+    color: var(--sum-text-muted);
+    white-space: pre-wrap;
+    overflow-x: auto;
+}
+
+.summarizer-error-empty {
+    text-align: center;
+    padding: var(--summarizer-spacing-2xl);
+    color: var(--sum-text-muted);
+    font-size: 14px;
+}
+
+.summarizer-error-empty i {
+    font-size: 32px;
+    color: var(--sum-success);
+    margin-bottom: var(--summarizer-spacing-md);
+    display: block;
+}

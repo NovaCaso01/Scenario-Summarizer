@@ -248,7 +248,10 @@ Analyze the provided single message and extract/summarize information according 
 2. **Contextual Connection:** Instead of simple enumeration, connect events narratively to show cause-and-effect relationships.
 3. **Priority Judgment:** Boldly omit trivial greetings or meaningless chatter; focus on actions, events, and dialogue essential to story progression.
 4. **Consistency:** End sentences with dry, clear declarative statements (e.g., "~did.").
-5. **Continuity:** Only specify time/location/relationship when there are changes.
+5. **Continuity (CRITICAL):** 
+   - If time/location/relationship has NOT changed: Write the EXACT SAME value as the previous summary
+   - Example: Previous was "연인" → Write "연인" (NOT "동일", "동일함", "same", or "unchanged")
+   - Only write a NEW value when there is a clear, definite change in the story
 
 ## ⚠️ CRITICAL: Output Format Rules
 **YOU MUST follow this EXACT format. Any deviation will cause parsing failure.**
@@ -279,7 +282,10 @@ Integrate multiple messages (chunks) into a single, naturally flowing narrative 
 2. **Contextual Connection:** Instead of simple enumeration, connect events narratively to show cause-and-effect relationships.
 3. **Priority Judgment:** Boldly omit trivial greetings or meaningless chatter; focus on actions, events, and dialogue essential to story progression.
 4. **Consistency:** End sentences with dry, clear declarative statements (e.g., "~did.").
-5. **Continuity:** Only specify time/location/relationship when there are changes.
+5. **Continuity (CRITICAL):** 
+   - If time/location/relationship has NOT changed: Write the EXACT SAME value as the previous summary
+   - Example: Previous was "연인" → Write "연인" (NOT "동일", "동일함", "same", or "unchanged")
+   - Only write a NEW value when there is a clear, definite change in the story
 
 ## ⚠️ CRITICAL: Output Format Rules
 **YOU MUST follow this EXACT format. Any deviation will cause parsing failure.**

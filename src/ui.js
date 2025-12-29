@@ -101,11 +101,13 @@ function showToast(type, message, options = {}) {
     // 에러인 경우 로그에 기록
     if (type === 'error' && options.error) {
         logError(options.context || 'UI', options.error, options.details || {});
+        // 에러 로그 확인 안내 추가
+        message += ' (상태 탭 → 에러 로그에서 자세한 내용 확인 가능)';
     }
     
     if (typeof toastr !== 'undefined' && toastr[type]) {
         // 에러일 경우 더 오래 표시
-        const toastOptions = type === 'error' ? { timeOut: 5000, extendedTimeOut: 2000 } : {};
+        const toastOptions = type === 'error' ? { timeOut: 7000, extendedTimeOut: 3000 } : {};
         toastr[type](message, '시나리오 요약', toastOptions);
     } else {
         console.log(`[${extensionName}] ${type}: ${message}`);

@@ -92,9 +92,37 @@ function migrateData(oldData) {
         newData.lastSummarizedIndex = oldData.lastSummarizedIndex ?? -1;
         newData.lastUpdate = oldData.lastUpdate;
     } else {
-        // 이미 summaries 형태면 버전만 업데이트
+        // 이미 summaries 형태면 버전만 업데이트 (형식 검증 포함)
         if (oldData.summaries) {
-            newData.summaries = oldData.summaries;
+            // 각 요약이 올바른 객체 형식인지 확인하고 수정
+            for (const [index, summary] of Object.entries(oldData.summaries)) {
+                // 문자열로 저장된 경우 객체로 변환
+                if (typeof summary === 'string') {
+                    newData.summaries[index] = {
+                        messageIndex: parseInt(index),
+                        content: summary,
+                        timestamp: new Date().toISOString(),
+                        migrated: true
+                    };
+                } 
+                // 이미 객체지만 content가 없는 경우
+                else if (typeof summary === 'object' && summary !== null) {
+                    if (!summary.content) {
+                        // content가 없으면 빈 문자열로 설정하고 나머지 필드 유지
+                        newData.summaries[index] = {
+                            ...summary,  // 기존 필드 유지
+                            messageIndex: parseInt(index),
+                            content: '[데이터 오류: content 누락]',
+                            timestamp: summary.timestamp || new Date().toISOString(),
+                            migrated: true
+                        };
+                    } else {
+                        // 정상 객체는 그대로 복사
+                        newData.summaries[index] = summary;
+                    }
+                }
+                // null이나 undefined는 건너뛰기
+            }
         }
         newData.lastSummarizedIndex = oldData.lastSummarizedIndex ?? -1;
         newData.lastUpdate = oldData.lastUpdate;
