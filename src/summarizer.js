@@ -828,12 +828,12 @@ export async function runAutoSummary() {
         return false;
     }
     
-    // 요약 안 된 메시지 수 확인
-    const unsummarizedCount = countUnsummarizedMessages(data, context.chat);
+    // 요약 안 된 메시지 수 확인 (마지막 메시지 제외 - 스와이프/삭제 안전)
+    const unsummarizedCount = countUnsummarizedMessages(data, context.chat, true);
     const interval = settings.summaryInterval || 10;
     const groupSize = settings.batchGroupSize || 10;
     
-    log(`Auto-summary: ${unsummarizedCount} unsummarized messages, interval=${interval}, groupSize=${groupSize}`);
+    log(`Auto-summary: ${unsummarizedCount} unsummarized messages (excluding last), interval=${interval}, groupSize=${groupSize}`);
     
     if (unsummarizedCount >= interval) {
         log(`Auto-summary triggered: ${unsummarizedCount} >= ${interval}`);
@@ -848,8 +848,8 @@ export async function runAutoSummary() {
             return false;
         }
         
-        // 첫 번째 미요약 인덱스 찾기
-        const startIndex = findFirstUnsummarizedIndex(data, context.chat);
+        // 첫 번째 미요약 인덱스 찾기 (마지막 메시지 제외)
+        const startIndex = findFirstUnsummarizedIndex(data, context.chat, true);
         const endIndex = startIndex + messagesToProcess - 1;
         
         log(`Auto-summary processing: indices ${startIndex} to ${endIndex} (${messagesToProcess} messages)`);
@@ -866,10 +866,14 @@ export async function runAutoSummary() {
  * 첫 번째 요약 안 된 메시지 인덱스 찾기
  * @param {Object} data 
  * @param {Array} chat 
+ * @param {boolean} excludeLastMessage - 마지막 메시지 제외 여부 (자동 요약 시 true)
  * @returns {number}
  */
-function findFirstUnsummarizedIndex(data, chat) {
-    for (let i = 0; i < chat.length; i++) {
+function findFirstUnsummarizedIndex(data, chat, excludeLastMessage = false) {
+    // 마지막 메시지 제외 옵션: 스와이프/삭제 등으로 인한 꼬임 방지
+    const endIndex = excludeLastMessage ? chat.length - 1 : chat.length;
+    
+    for (let i = 0; i < endIndex; i++) {
         const msg = chat[i];
         // 유저가 숨긴 메시지가 아니고, 요약이 없으면
         if (!msg._userHidden && !isUserHiddenMessage(msg, i) && !data.summaries[i]) {
@@ -880,14 +884,18 @@ function findFirstUnsummarizedIndex(data, chat) {
 }
 
 /**
- * 요약 안 된 메시지 수 세기
+ * 요약 안 된 메시지 수 세기 (자동 요약용: 마지막 메시지 제외)
  * @param {Object} data 
  * @param {Array} chat 
+ * @param {boolean} excludeLastMessage - 마지막 메시지 제외 여부 (자동 요약 시 true)
  * @returns {number}
  */
-function countUnsummarizedMessages(data, chat) {
+function countUnsummarizedMessages(data, chat, excludeLastMessage = false) {
     let count = 0;
-    for (let i = 0; i < chat.length; i++) {
+    // 마지막 메시지 제외 옵션: 스와이프/삭제 등으로 인한 꼬임 방지
+    const endIndex = excludeLastMessage ? chat.length - 1 : chat.length;
+    
+    for (let i = 0; i < endIndex; i++) {
         const msg = chat[i];
         if (!msg._userHidden && !isUserHiddenMessage(msg, i) && !data.summaries[i]) {
             count++;
