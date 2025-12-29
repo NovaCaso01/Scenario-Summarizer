@@ -1024,7 +1024,32 @@ export function doRestoreVisibility() {
  * 요약 초기화
  */
 export async function doReset() {
-    if (!confirm('정말 이 채팅의 모든 요약을 삭제하시겠습니까?')) {
+    if (!confirm('정말 이 채팅의 모든 요약과 등장인물을 삭제하시겠습니까?')) {
+        return;
+    }
+    
+    // 등장인물도 함께 초기화하려면 먼저 비운 후 clearAllSummaries 호출
+    const summaryData = getSummaryData();
+    if (summaryData) {
+        summaryData.characters = {};
+    }
+    
+    clearAllSummaries();
+    
+    await saveSummaryData();
+    restoreAllVisibility();
+    clearInjection();
+    updateStatusDisplay();
+    renderCharactersList();
+    
+    showToast('success', '요약과 등장인물이 초기화되었습니다.');
+}
+
+/**
+ * 요약만 초기화 (등장인물 유지)
+ */
+export async function doResetSummariesOnly() {
+    if (!confirm('정말 이 채팅의 모든 요약을 삭제하시겠습니까?\n(등장인물 정보는 유지됩니다)')) {
         return;
     }
     
@@ -2097,6 +2122,7 @@ export function bindUIEvents() {
     $("#summarizer-view-summary").on("click", viewSummaries);
     $("#summarizer-preview-close").on("click", closePreview);
     $("#summarizer-restore-visibility").on("click", doRestoreVisibility);
+    $("#summarizer-reset-summaries").on("click", doResetSummariesOnly);
     $("#summarizer-reset").on("click", doReset);
     
     // 에러 로그
@@ -2488,8 +2514,11 @@ function showErrorLogs() {
         let html = '';
         for (const err of errors) {
             const time = new Date(err.timestamp).toLocaleString('ko-KR');
+            const stack = err.stack 
+                ? `<div class="summarizer-error-details"><strong>Stack Trace:</strong>\n${escapeHtml(err.stack)}</div>` 
+                : '';
             const details = Object.keys(err.details).length > 0 
-                ? `<div class="summarizer-error-details">${escapeHtml(JSON.stringify(err.details, null, 2))}</div>` 
+                ? `<div class="summarizer-error-details"><strong>Details:</strong>\n${escapeHtml(JSON.stringify(err.details, null, 2))}</div>` 
                 : '';
             
             html += `
@@ -2497,6 +2526,7 @@ function showErrorLogs() {
                     <div class="summarizer-error-time">${time}</div>
                     <div class="summarizer-error-context">${escapeHtml(err.context)}</div>
                     <div class="summarizer-error-message">${escapeHtml(err.message)}</div>
+                    ${stack}
                     ${details}
                 </div>
             `;

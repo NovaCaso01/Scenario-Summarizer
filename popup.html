@@ -251,9 +251,10 @@
                         <label for="summarizer-ui-theme">컬러 테마</label>
                         <select id="summarizer-ui-theme" class="summarizer-select">
                             <option value="mono-gray">Mono Gray (모노 그레이)</option>
-                            <option value="dusty-rose">Dusty Rose (베이지/로즈)</option>
-                            <option value="ocean-breeze">Ocean Breeze (스카이블루/네이비)</option>
-                            <option value="matcha-garden">Matcha Garden (말차/그린)</option>
+                            <option value="dusty-rose">Dusty Rose (더스티 로즈)</option>
+                            <option value="ocean-breeze">Ocean Breeze (오션 브리즈)</option>
+                            <option value="matcha-garden">Matcha Garden (말차 가든)</option>
+                            <option value="dark-mono">Dark Mono (다크 모노)</option>
                         </select>
                         <small class="summarizer-hint">확장 UI의 색상 테마를 선택합니다</small>
                         
@@ -571,9 +572,14 @@
                 <!-- 초기화 (위험 액션) -->
                 <div class="summarizer-section">
                     <h4><i class="fa-solid fa-rotate-left"></i> 초기화</h4>
-                    <button id="summarizer-reset" class="summarizer-btn summarizer-btn-danger summarizer-btn-full">
-                        <i class="fa-solid fa-trash"></i> 이 채팅의 요약 & 인물 초기화
-                    </button>
+                    <div class="summarizer-btn-group">
+                        <button id="summarizer-reset-summaries" class="summarizer-btn summarizer-btn-danger">
+                            <i class="fa-solid fa-eraser"></i> 요약만 초기화
+                        </button>
+                        <button id="summarizer-reset" class="summarizer-btn summarizer-btn-danger">
+                            <i class="fa-solid fa-trash"></i> 요약 & 인물 초기화
+                        </button>
+                    </div>
                 </div>
                 
             </div>

@@ -59,7 +59,7 @@ export const API_SOURCE = {
 export const defaultSettings = {
     // 기본 활성화
     enabled: true,
-    automaticMode: true,           // 자동 요약 on/off
+    automaticMode: false,          // 자동 요약 on/off (기본 OFF)
     
     // 요약 설정
     summaryInterval: 10,           // N개 메세지마다 자동 요약

@@ -232,4 +232,4 @@ OpenVault is distributed under AGPL-3.0 license, and this project follows the sa
 
 ## 📌 Version
 
-v1.0.3
+v1.0.4

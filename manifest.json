@@ -6,6 +6,6 @@
     "js": "index.js",
     "css": "style.css",
     "author": "User",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "description": "채팅 내용을 개별 메시지 단위로 자동 요약하여 chatMetadata에 저장하고, 요약된 메시지를 자동으로 숨깁니다. 자동 요약, 토큰 예산, 분기 대응 지원."
 }

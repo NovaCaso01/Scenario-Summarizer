@@ -175,6 +175,42 @@
     --sum-overlay: rgba(55, 68, 38, 0.4);
 }
 
+/* ===== 테마 5: Dark Mono - 다크 모노톤 ===== */
+#scenario-summarizer-popup[data-theme="dark-mono"] {
+    --sum-bg-primary: #1A1A1A;
+    --sum-bg-secondary: #242424;
+    --sum-bg-tertiary: #2E2E2E;
+    --sum-bg-input: #2A2A2A;
+    --sum-bg-hover: #303030;
+    --sum-bg-active: #3A3A3A;
+    
+    --sum-text-primary: #E8E8E8;
+    --sum-text-secondary: #C0C0C0;
+    --sum-text-muted: #9A9A9A;
+    --sum-text-hint: #707070;
+    
+    --sum-border: #3A3A3A;
+    --sum-border-light: #2E2E2E;
+    --sum-border-focus: #606060;
+    
+    --sum-accent: #707070;
+    --sum-accent-hover: #909090;
+    --sum-accent-text: #FFFFFF;
+    
+    --sum-success: #6A8B6A;
+    --sum-warning: #A89B5A;
+    --sum-danger: #A87070;
+    --sum-info: #6A7A8A;
+    
+    --sum-badge-bg: #2E2E2E;
+    --sum-badge-text: #C0C0C0;
+    --sum-tag-bg: #3A3A3A;
+    --sum-tag-text: #E8E8E8;
+    
+    --sum-shadow: rgba(0, 0, 0, 0.3);
+    --sum-overlay: rgba(0, 0, 0, 0.7);
+}
+
 /* ===== 팝업 기본 구조 ===== */
 #scenario-summarizer-popup {
     display: none;

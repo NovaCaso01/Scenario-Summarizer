@@ -407,7 +407,18 @@ export function clearAllSummaries() {
     const context = getContext();
     if (!context?.chatMetadata) return;
     
-    context.chatMetadata[METADATA_KEY] = createEmptyData();
+    const data = getSummaryData();
+    if (!data) {
+        context.chatMetadata[METADATA_KEY] = createEmptyData();
+        return;
+    }
+    
+    // 등장인물 정보는 유지하고 요약만 초기화
+    const preservedCharacters = data.characters || {};
+    context.chatMetadata[METADATA_KEY] = {
+        ...createEmptyData(),
+        characters: preservedCharacters
+    };
 }
 
 /**
@@ -773,7 +784,8 @@ export function getPreviousContext(beforeIndex) {
     let relationship = '불명';
     
     for (const idx of prevIndices) {
-        const content = data.summaries[idx]?.content || '';
+        const summary = data.summaries[idx];
+        const content = String(summary?.content ?? summary ?? '');
         
         if (time === '불명') {
             const timeMatch = content.match(/\* 시간[：:]\s*(.+)/);
