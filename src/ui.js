@@ -16,7 +16,7 @@ import {
     setSummaryForMessage, deleteSummaryForMessage, clearAllSummaries,
     exportSummaries, importSummaries, searchSummaries, getCharacterName,
     getCharacters, getCharacter, setCharacter, deleteCharacter, 
-    formatCharactersText, mergeExtractedCharacters
+    formatCharactersText, mergeExtractedCharacters, cleanupOrphanedSummaries
 } from './storage.js';
 import { runSummary, resummarizeMessage } from './summarizer.js';
 import { applyMessageVisibility, restoreAllVisibility, getVisibilityStats } from './visibility.js';
@@ -531,9 +531,22 @@ export function updateStatusDisplay() {
     const stats = getVisibilityStats();
     
     const totalMessages = context?.chat?.length || 0;
+    
+    // 메시지 범위를 벗어난 고아 요약 정리 (메시지 삭제 시)
+    cleanupOrphanedSummaries();
+    
     const summaries = getRelevantSummaries();
-    const summarizedCount = Object.keys(summaries).length;
-    const pendingCount = totalMessages - summarizedCount;
+    
+    // 현재 채팅 범위 내에 있는 요약만 카운트
+    let summarizedCount = 0;
+    for (const indexStr of Object.keys(summaries)) {
+        const index = parseInt(indexStr);
+        if (index < totalMessages) {
+            summarizedCount++;
+        }
+    }
+    
+    const pendingCount = Math.max(0, totalMessages - summarizedCount);
     
     const settings = getSettings();
     const interval = settings.summaryInterval || 10;

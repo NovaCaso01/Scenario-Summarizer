@@ -240,6 +240,36 @@ export function getSummaryForMessage(messageIndex) {
 }
 
 /**
+ * 현재 채팅 범위를 벗어난 요약 정리
+ * 메시지 삭제 시 요약 인덱스가 맞지 않는 문제 해결
+ * @returns {number} - 정리된 요약 수
+ */
+export function cleanupOrphanedSummaries() {
+    const context = getContext();
+    const data = getSummaryData();
+    
+    if (!context?.chat || !data?.summaries) return 0;
+    
+    const totalMessages = context.chat.length;
+    let cleanedCount = 0;
+    
+    // 현재 메시지 범위를 벗어난 요약 삭제
+    for (const indexStr of Object.keys(data.summaries)) {
+        const index = parseInt(indexStr);
+        if (index >= totalMessages) {
+            delete data.summaries[indexStr];
+            cleanedCount++;
+        }
+    }
+    
+    if (cleanedCount > 0) {
+        log(`Cleaned up ${cleanedCount} orphaned summaries (message count: ${totalMessages})`);
+    }
+    
+    return cleanedCount;
+}
+
+/**
  * 특정 메시지의 요약 저장
  * @param {number} messageIndex 
  * @param {string} content 
@@ -275,7 +305,40 @@ export function deleteSummaryForMessage(messageIndex) {
     const data = getSummaryData();
     if (!data || !data.summaries) return;
     
-    delete data.summaries[messageIndex];
+    const summary = data.summaries[messageIndex];
+    const content = summary?.content ?? summary ?? '';
+    
+    // 그룹 요약인 경우 (#X-Y 패턴), 연결된 모든 항목도 삭제
+    const groupMatch = String(content).match(/^#(\d+)-(\d+)/);
+    if (groupMatch) {
+        const startIdx = parseInt(groupMatch[1]);
+        const endIdx = parseInt(groupMatch[2]);
+        
+        // 그룹 범위 내 모든 요약 삭제
+        for (let i = startIdx; i <= endIdx; i++) {
+            delete data.summaries[i];
+        }
+    } 
+    // "그룹 요약에 포함" 표시인 경우, 해당 그룹 전체 삭제
+    else if (String(content).includes('그룹 요약에 포함')) {
+        const refMatch = String(content).match(/\[→ #(\d+)-(\d+) 그룹 요약에 포함\]/);
+        if (refMatch) {
+            const startIdx = parseInt(refMatch[1]);
+            const endIdx = parseInt(refMatch[2]);
+            
+            // 그룹 범위 내 모든 요약 삭제
+            for (let i = startIdx; i <= endIdx; i++) {
+                delete data.summaries[i];
+            }
+        } else {
+            // 패턴 매칭 실패 시 현재 항목만 삭제
+            delete data.summaries[messageIndex];
+        }
+    }
+    else {
+        // 개별 요약: 해당 인덱스만 삭제
+        delete data.summaries[messageIndex];
+    }
     
     // lastSummarizedIndex 재계산
     const indices = Object.keys(data.summaries).map(Number);
