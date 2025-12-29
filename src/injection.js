@@ -162,6 +162,8 @@ export async function injectSummaryToPrompt() {
             cleanedContent = cleanedContent.replace(/^#\d+-\d+\n?/, '').trim();
         } else {
             summaryText += `--- #${index} ---\n`;
+            // 개별 요약에서도 중복되는 #숫자 헤더 제거
+            cleanedContent = cleanedContent.replace(/^#\d+\n?/, '').trim();
         }
         summaryText += cleanedContent + "\n\n";
     }
@@ -267,6 +269,8 @@ export async function getInjectionPreview() {
             cleanedContent = cleanedContent.replace(/^#\d+-\d+\n?/, '').trim();
         } else {
             text += `--- #${index} ---\n`;
+            // 개별 요약에서도 중복되는 #숫자 헤더 제거
+            cleanedContent = cleanedContent.replace(/^#\d+\n?/, '').trim();
         }
         text += cleanedContent + "\n\n";
     }
