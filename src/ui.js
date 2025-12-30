@@ -731,14 +731,27 @@ async function renderSummaryList() {
         const rangeMatch = content.match(/^#(\d+)-(\d+)/);
         let displayNumber = rangeMatch ? `#${rangeMatch[1]}~${rangeMatch[2]}` : `#${index}`;
         
+        // 파싱 오류/불완전 요약 감지
+        const hasParsingError = content.includes('파싱 실패') || content.includes('❌');
+        const hasWarning = content.includes('불완전한') || content.includes('⚠️') || content.includes('재요약 권장');
+        const errorClass = hasParsingError ? ' summarizer-entry-error' : (hasWarning ? ' summarizer-entry-warning' : '');
+        const errorBadge = hasParsingError ? '<span class="summarizer-error-badge" title="파싱 오류 - 재요약 필요">❌ 오류</span>' : 
+                          (hasWarning ? '<span class="summarizer-warning-badge" title="불완전한 요약 - 재요약 권장">⚠️ 불완전</span>' : '');
+        
         // 무효화된 요약 스타일
         const invalidatedClass = isInvalidated ? ' summarizer-entry-invalidated' : '';
         const invalidatedBadge = isInvalidated ? `<span class="summarizer-invalidated-badge" title="${escapeHtml(invalidReason)}">⚠️ 무효화됨</span>` : '';
         
+        // 표시용 content: 첫 줄의 헤더(#번호 또는 #번호-번호)는 제거 (UI에서 별도 표시)
+        let displayContent = content;
+        if (/^#\d+(-\d+)?\s*\n/.test(displayContent)) {
+            displayContent = displayContent.replace(/^#\d+(-\d+)?\s*\n/, '');
+        }
+        
         html += `
-        <div class="summarizer-entry${invalidatedClass}" data-msg-index="${index}">
+        <div class="summarizer-entry${invalidatedClass}${errorClass}" data-msg-index="${index}">
             <div class="summarizer-entry-header">
-                <span class="summarizer-entry-number">${displayNumber}${invalidatedBadge}</span>
+                <span class="summarizer-entry-number">${displayNumber}${invalidatedBadge}${errorBadge}</span>
                 ${dateDisplay ? `<span class="summarizer-entry-date">${dateDisplay}</span>` : ''}
                 <div class="summarizer-entry-actions">
                     <button class="summarizer-btn summarizer-btn-tiny summarizer-edit-entry" data-idx="${index}" title="수정">
@@ -752,7 +765,7 @@ async function renderSummaryList() {
                     </button>
                 </div>
             </div>
-            <pre class="summarizer-entry-content">${escapeHtml(content)}</pre>
+            <pre class="summarizer-entry-content">${escapeHtml(displayContent)}</pre>
             <div class="summarizer-entry-edit-area" style="display:none;">
                 <textarea class="summarizer-entry-textarea">${escapeHtml(content)}</textarea>
                 <div class="summarizer-entry-edit-buttons">
@@ -950,15 +963,25 @@ export function doSearch() {
     </div>`;
     
     for (const result of results) {
-        const highlighted = result.content.replace(
+        // 표시용 content: 첫 줄의 헤더 제거
+        let displayContent = result.content;
+        if (/^#\d+(-\d+)?\s*\n/.test(displayContent)) {
+            displayContent = displayContent.replace(/^#\d+(-\d+)?\s*\n/, '');
+        }
+        
+        const highlighted = displayContent.replace(
             new RegExp(escapeHtml(query), 'gi'),
             match => `<mark>${match}</mark>`
         );
         
+        // 그룹 요약인 경우 번호 범위 표시
+        const rangeMatch = result.content.match(/^#(\d+)-(\d+)/);
+        const displayNumber = rangeMatch ? `#${rangeMatch[1]}~${rangeMatch[2]}` : `#${result.messageIndex}`;
+        
         html += `
         <div class="summarizer-entry" data-msg-index="${result.messageIndex}">
             <div class="summarizer-entry-header">
-                <span class="summarizer-entry-number">#${result.messageIndex + 1}</span>
+                <span class="summarizer-entry-number">${displayNumber}</span>
             </div>
             <pre class="summarizer-entry-content">${highlighted}</pre>
         </div>`;

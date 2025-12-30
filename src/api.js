@@ -72,7 +72,9 @@ async function callConnectionManagerAPI(prompt) {
     }
     
     try {
-        log(`Using ConnectionManager profile: ${profile.name}`);
+        // 설정에서 응답 토큰 수 가져오기 (0 또는 미설정 = 프리셋 설정 사용)
+        const maxTokens = settings.maxResponseTokens || null;
+        log(`Using ConnectionManager profile: ${profile.name} (maxTokens: ${maxTokens || 'preset default'})`);
         
         const messages = [
             {
@@ -85,7 +87,7 @@ async function callConnectionManagerAPI(prompt) {
         const result = await ConnectionManagerRequestService.sendRequest(
             profileId,
             messages,
-            4000, // max tokens
+            maxTokens,
             {
                 includePreset: true,
                 includeInstruct: true,

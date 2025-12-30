@@ -1484,6 +1484,48 @@
     cursor: help;
 }
 
+/* 파싱 오류/불완전 요약 스타일 */
+.summarizer-entry-error {
+    border-left: 3px solid #ef4444;
+    background: rgba(239, 68, 68, 0.05);
+}
+
+.summarizer-entry-warning {
+    border-left: 3px solid #f59e0b;
+    background: rgba(245, 158, 11, 0.05);
+}
+
+.summarizer-error-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 500;
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+    border-radius: var(--summarizer-radius-sm);
+    cursor: help;
+}
+
+.summarizer-warning-badge {
+    display: inline-block;
+    margin-left: 8px;
+    padding: 3px 8px;
+    font-size: 10px;
+    font-weight: 500;
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid rgba(245, 158, 11, 0.3);
+    border-radius: var(--summarizer-radius-sm);
+    cursor: help;
+}
+
+/* 오류 메시지가 포함된 요약 강조 */
+pre.summarizer-entry-content {
+    position: relative;
+}
+
 .summarizer-entry-header {
     display: flex;
     align-items: center;

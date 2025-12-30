@@ -28,13 +28,39 @@ const REGEX_CHARACTERS_JSON = /\[CHARACTERS_JSON\]\s*([\s\S]*?)\s*\[\/CHARACTERS
 const REGEX_GROUP_HEADER = /^#\d+-\d+\s*\n?/;
 
 /**
+ * 요약 응답이 불완전한지 검증
+ * @param {string} content - 요약 내용
+ * @returns {boolean} - 불완전하면 true
+ */
+function isIncompleteSummary(content) {
+    if (!content || content.trim().length < 15) return true;
+    
+    const trimmed = content.trim();
+    
+    // 따옴표가 열리고 닫히지 않음
+    const doubleQuotes = (trimmed.match(/"/g) || []).length;
+    if (doubleQuotes % 2 !== 0) return true;
+    
+    // 열린 괄호 확인
+    const openParens = (trimmed.match(/[\(\[\{]/g) || []).length;
+    const closeParens = (trimmed.match(/[\)\]\}]/g) || []).length;
+    if (openParens > closeParens) return true;
+    
+    // [CHARACTERS_JSON]이 열리고 닫히지 않음
+    if (trimmed.includes('[CHARACTERS_JSON]') && !trimmed.includes('[/CHARACTERS_JSON]')) return true;
+    
+    return false;
+}
+
+/**
  * 폴백 파싱: 정규식 실패 시 라인별 파싱 시도
  * @param {string} text - 파싱할 텍스트
  * @param {number} startNum - 시작 번호
  * @param {number} endNum - 끝 번호
+ * @param {number} totalGroups - 전체 그룹 수 (단일 그룹일 때만 전체 추출 허용)
  * @returns {string|null} - 파싱된 요약 또는 null
  */
-function parseFallback(text, startNum, endNum) {
+function parseFallback(text, startNum, endNum, totalGroups = 1) {
     try {
         const lines = text.split('\n');
         let inTargetGroup = false;
@@ -72,8 +98,14 @@ function parseFallback(text, startNum, endNum) {
             return summaryLines.join('\n');
         }
         
-        // 그룹 헤더 자체가 없는 경우 (단일 요약일 가능성)
-        // 전체 텍스트에서 카테고리 라인만 추출
+        // 그룹 헤더 자체가 없는 경우 - 단일 그룹일 때만 전체 추출 허용
+        // 여러 그룹이 있는데 헤더가 없으면 파싱 실패로 처리 (중복 방지)
+        if (totalGroups > 1) {
+            log(`Fallback parsing rejected: multiple groups (${totalGroups}) but no group header found`);
+            return null;
+        }
+        
+        // 단일 그룹일 때만 전체 텍스트에서 카테고리 라인 추출
         const categoryPattern = /^[*\-•]\s*[^:：]+[:：]/;
         const extractedLines = [];
         
@@ -86,8 +118,7 @@ function parseFallback(text, startNum, endNum) {
         }
         
         // 추출된 라인이 있고, 전체 텍스트 길이가 합리적인 경우에만 반환
-        // (너무 많으면 전체 묶음 요약을 잘못 파싱한 것일 수 있음)
-        if (extractedLines.length > 0 && extractedLines.length <= 20) {
+        if (extractedLines.length > 0 && extractedLines.length <= 10) {
             return extractedLines.join('\n');
         }
         
@@ -250,6 +281,36 @@ ${profileInfo}
     // 언어별 추가 리마인더 (출력 형식 앞에 추가) - 매우 강력
     const langReminder = LANG_REMINDERS[language] || LANG_REMINDERS['ko'];
     
+    // 메시지 번호 범위 추출 (강조 문구용)
+    const messageNumbers = messages.map(m => m.mes_id !== undefined ? m.mes_id : m.index).filter(n => n !== undefined);
+    const minNum = Math.min(...messageNumbers);
+    const maxNum = Math.max(...messageNumbers);
+    const messageCount = messageNumbers.length;
+    
+    // 모든 메시지 요약 강제 강조 문구
+    const completionEmphasis = messageCount > 1 ? `
+## ⚠️⚠️⚠️ CRITICAL WARNING - DO NOT SKIP ANY MESSAGE ⚠️⚠️⚠️
+**You MUST output summaries for ALL ${messageCount} messages from #${minNum} to #${maxNum}.**
+**Do NOT stop early. Do NOT truncate. EVERY single message number MUST have its own complete summary.**
+**If you skip any message, the entire response will be rejected and you will need to redo everything.**
+**Complete list of required message numbers: ${messageNumbers.join(', ')}**
+` : '';
+    
+    // 출력 형식 예시 생성 (메시지 번호 기반)
+    const formatExample = messageCount > 1 ? `
+Example output structure:
+#${minNum}
+* 시나리오: [summary for message ${minNum}]
+
+#${minNum + 1}
+* 시나리오: [summary for message ${minNum + 1}]
+
+...continue for each message...
+
+#${maxNum}
+* 시나리오: [summary for message ${maxNum}]
+` : '';
+    
     // 최종 프롬프트 조립: 언어 + 지침 + 프로필정보 + 이전컨텍스트 + 이전요약 + 기존캐릭터 + 메시지 + 출력형식
     const prompt = `${langInstruction}
 
@@ -258,11 +319,14 @@ ${profileSection}${contextInfo}${recentSummariesSection}
 ${existingChars}
 ## Messages to Summarize
 ${formattedMessages}
-${langReminder}
-## Output Format (Required - for each message)
+${completionEmphasis}${langReminder}
+## Output Format (MANDATORY - Follow EXACTLY)
+**⚠️ Output ONE separate section per message. Do NOT combine or merge multiple messages into one summary.**
+**Each message MUST start with #MessageNumber on its own line.**
+
 #MessageNumber
 ${categoryFormat || '* Scenario: (Integrate key events and dialogue narratively)'}
-${characterExtraction}`;
+${formatExample}${characterExtraction}`;
     
     return prompt;
 }
@@ -312,7 +376,7 @@ function buildCategoryFormat(cats, categoryOrder) {
                 atmosphere: 'Scene tone and mood',
                 location: 'Current location/setting',
                 time: 'Time of day',
-                relationship: 'Relationship changes between characters'
+                relationship: 'Current relationship status between characters - ALWAYS include even if unchanged'
             };
             const label = key === 'scenario' ? 'Scenario' : 
                           key === 'emotion' ? 'Emotion' :
@@ -514,19 +578,34 @@ export function parseBatchGroupsResponse(response, groups) {
     const firstIndex = groups.length > 0 ? groups[0].indices[0] : 0;
     const cleanResponse = extractAndSaveCharacters(response, firstIndex);
     const result = {};
+    const totalGroups = groups.length;
     
-    log(`Parsing batch groups response (${cleanResponse.length} chars), ${groups.length} groups expected`);
+    log(`Parsing batch groups response (${cleanResponse.length} chars), ${totalGroups} groups expected`);
+    
+    // 전체 응답이 불완전한지 먼저 체크
+    if (isIncompleteSummary(cleanResponse)) {
+        log(`WARNING: Incomplete API response detected, marking all groups for re-summarization`);
+        for (const group of groups) {
+            const startNum = group.indices[0];
+            const endNum = group.indices[group.indices.length - 1];
+            result[group.indices[0]] = `#${startNum}-${endNum}\n[⚠️ 불완전한 응답 - 재요약 필요]`;
+            for (let i = 1; i < group.indices.length; i++) {
+                result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+            }
+        }
+        return result;
+    }
     
     // 각 그룹에 대해 패턴 매칭
     for (const group of groups) {
         const startNum = group.indices[0];
         const endNum = group.indices[group.indices.length - 1];
         
-        // #시작-끝 패턴 찾기
+        // #시작-끝 패턴 찾기 - 글로벌 플래그 없이 사용하여 lastIndex 문제 방지
         const patterns = [
-            new RegExp(`#${startNum}-${endNum}\\s*\\n([\\s\\S]*?)(?=#\\d+-\\d+|===|$)`, 'g'),
-            new RegExp(`#${startNum}\\s*[-~]\\s*${endNum}\\s*\\n([\\s\\S]*?)(?=#\\d+|===|$)`, 'g'),
-            new RegExp(`\\[#${startNum}-${endNum}\\]\\s*\\n?([\\s\\S]*?)(?=\\[#\\d+|===|$)`, 'g')
+            new RegExp(`#${startNum}-${endNum}\\s*\\n([\\s\\S]*?)(?=#\\d+-\\d+|===|$)`),
+            new RegExp(`#${startNum}\\s*[-~]\\s*${endNum}\\s*\\n([\\s\\S]*?)(?=#\\d+|===|$)`),
+            new RegExp(`\\[#${startNum}-${endNum}\\]\\s*\\n?([\\s\\S]*?)(?=\\[#\\d+|===|$)`)
         ];
         
         let matched = false;
@@ -534,8 +613,15 @@ export function parseBatchGroupsResponse(response, groups) {
             const match = pattern.exec(cleanResponse);
             if (match && match[1].trim()) {
                 const summary = match[1].trim();
-                // 첫 번째 인덱스에 전체 그룹 요약 저장
-                result[group.indices[0]] = `#${startNum}-${endNum}\n${summary}`;
+                
+                // 개별 그룹 요약도 불완전 여부 체크
+                if (isIncompleteSummary(summary)) {
+                    log(`WARNING: Incomplete summary for group #${startNum}-${endNum}`);
+                    result[group.indices[0]] = `#${startNum}-${endNum}\n[⚠️ 불완전한 요약 - 재요약 권장]\n${summary}`;
+                } else {
+                    result[group.indices[0]] = `#${startNum}-${endNum}\n${summary}`;
+                }
+                
                 // 나머지 인덱스는 그룹에 포함됨 표시
                 for (let i = 1; i < group.indices.length; i++) {
                     result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
@@ -543,24 +629,28 @@ export function parseBatchGroupsResponse(response, groups) {
                 matched = true;
                 break;
             }
-            pattern.lastIndex = 0; // 리셋
         }
         
-        // 매칭 실패 시, 폴백 파싱 시도
+        // 매칭 실패 시, 폴백 파싱 시도 (그룹 수 전달)
         if (!matched) {
             log(`Pattern match failed for group #${startNum}-${endNum}, trying fallback parsing`);
-            const fallbackSummary = parseFallback(cleanResponse, startNum, endNum);
+            const fallbackSummary = parseFallback(cleanResponse, startNum, endNum, totalGroups);
             
             if (fallbackSummary) {
-                result[group.indices[0]] = `#${startNum}-${endNum}\n${fallbackSummary}`;
+                // 폴백 결과도 불완전 여부 체크
+                if (isIncompleteSummary(fallbackSummary)) {
+                    result[group.indices[0]] = `#${startNum}-${endNum}\n[⚠️ 불완전한 요약 - 재요약 권장]\n${fallbackSummary}`;
+                } else {
+                    result[group.indices[0]] = `#${startNum}-${endNum}\n${fallbackSummary}`;
+                }
                 for (let i = 1; i < group.indices.length; i++) {
                     result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
                 }
                 log(`Fallback parsing succeeded for #${startNum}-${endNum}`);
             } else {
-                // 폴백도 실패 시 플레이스홀더
-                log(`All parsing failed for #${startNum}-${endNum}, saving placeholder`);
-                result[group.indices[0]] = `#${startNum}-${endNum}\n[요약 파싱 실패 - 재요약 필요]`;
+                // 폴백도 실패 시 플레이스홀더 - 태그는 반드시 남김
+                log(`All parsing failed for #${startNum}-${endNum}, saving placeholder with tag`);
+                result[group.indices[0]] = `#${startNum}-${endNum}\n[❌ 요약 파싱 실패 - 재요약 필요]`;
                 for (let i = 1; i < group.indices.length; i++) {
                     result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
                 }
@@ -568,16 +658,16 @@ export function parseBatchGroupsResponse(response, groups) {
         }
     }
     
-    // 결과가 없으면 전체 응답을 첫 그룹에 할당
-    if (Object.keys(result).length === 0 && groups.length > 0) {
-        log(`All pattern matching failed, assigning whole response to first group`);
-        const firstGroup = groups[0];
-        const startNum = firstGroup.indices[0];
-        const endNum = firstGroup.indices[firstGroup.indices.length - 1];
-        
-        result[firstGroup.indices[0]] = `#${startNum}-${endNum}\n${cleanResponse.trim()}`;
-        for (let i = 1; i < firstGroup.indices.length; i++) {
-            result[firstGroup.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+    // 모든 그룹에 대해 결과가 있어야 함 - 누락된 그룹도 플레이스홀더 저장
+    for (const group of groups) {
+        if (result[group.indices[0]] === undefined) {
+            const startNum = group.indices[0];
+            const endNum = group.indices[group.indices.length - 1];
+            log(`Group #${startNum}-${endNum} was missing from results, adding placeholder`);
+            result[group.indices[0]] = `#${startNum}-${endNum}\n[❌ 요약 누락 - 재요약 필요]`;
+            for (let i = 1; i < group.indices.length; i++) {
+                result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+            }
         }
     }
     
@@ -599,60 +689,90 @@ export function parseApiResponse(response, startIndex, endIndex) {
     
     log(`Parsing response (${cleanResponse.length} chars), startIndex=${startIndex}, endIndex=${endIndex}`);
     
-    // 개별 모드: 여러 패턴 시도
-    // 패턴 1: #숫자\n내용 (기본) - 이제 0-indexed
-    let pattern = /#(\d+)\s*\n([\s\S]*?)(?=#\d+\s*\n|$)/g;
+    // 방법 1: 정규식으로 #숫자 헤더 기반 파싱 (다양한 형식 지원)
+    // #숫자, **#숫자**, [#숫자], 【#숫자】, ## #숫자 등
+    const headerPattern = /(?:^|\n)\s*(?:\*\*)?(?:##\s*)?[#\[【]?#?(\d+)[\]】]?(?:\*\*)?[:\s]*\n/g;
+    const headers = [];
     let match;
     
-    while ((match = pattern.exec(cleanResponse)) !== null) {
-        const msgNum = parseInt(match[1]);
-        const summary = match[2].trim();
-        const index = msgNum; // 이제 번호 = 인덱스 (0-indexed)
-        
-        if (index >= startIndex && index <= endIndex && summary) {
-            result[index] = `#${msgNum}\n${summary}`;
-        }
+    // 모든 헤더 위치와 번호 수집
+    while ((match = headerPattern.exec(cleanResponse)) !== null) {
+        headers.push({
+            num: parseInt(match[1]),
+            endPos: match.index + match[0].length  // 헤더 끝 위치 (내용 시작)
+        });
     }
     
-    // 패턴 1 실패 시, 패턴 2 시도: [#숫자] 또는 【#숫자】 형식
-    if (Object.keys(result).length === 0) {
-        pattern = /[\[【]#?(\d+)[\]】]\s*\n?([\s\S]*?)(?=[\[【]#?\d+[\]】]|$)/g;
-        
-        while ((match = pattern.exec(cleanResponse)) !== null) {
-            const msgNum = parseInt(match[1]);
-            const summary = match[2].trim();
-            const index = msgNum; // 0-indexed
+    log(`Found ${headers.length} headers in response`);
+    
+    if (headers.length > 0) {
+        // 각 헤더의 내용 추출
+        for (let i = 0; i < headers.length; i++) {
+            const header = headers[i];
+            const nextPos = (i + 1 < headers.length) 
+                ? cleanResponse.lastIndexOf('\n', headers[i + 1].endPos - headers[i + 1].toString().length)
+                : cleanResponse.length;
             
-            if (index >= startIndex && index <= endIndex && summary) {
-                result[index] = `#${msgNum}\n${summary}`;
+            // 헤더 끝부터 다음 헤더 전까지 (또는 끝까지)
+            const startPos = header.endPos;
+            const content = cleanResponse.substring(startPos, nextPos).trim();
+            
+            // 인덱스 범위 체크
+            if (header.num >= startIndex && header.num <= endIndex && content) {
+                result[header.num] = content;
             }
         }
     }
     
-    // 패턴 2도 실패 시, 패턴 3 시도: **#숫자** 또는 ## #숫자 마크다운 형식
+    // 방법 1 실패 시, 방법 2: 간단한 split 기반 파싱
     if (Object.keys(result).length === 0) {
-        pattern = /(?:\*\*#?|##\s*#?)(\d+)(?:\*\*)?[:\s]*\n?([\s\S]*?)(?=(?:\*\*#?|##\s*#?)\d+|$)/g;
+        log(`Header-based parsing failed, trying split-based parsing`);
         
-        while ((match = pattern.exec(cleanResponse)) !== null) {
-            const msgNum = parseInt(match[1]);
-            const summary = match[2].trim();
-            const index = msgNum; // 0-indexed
-            
-            if (index >= startIndex && index <= endIndex && summary) {
-                result[index] = `#${msgNum}\n${summary}`;
+        // #숫자 로 분할 (줄바꿈 없이도 가능)
+        const parts = cleanResponse.split(/(?=(?:^|\n)\s*#\d+[\s:\n])/);
+        
+        for (const part of parts) {
+            const numMatch = part.match(/^[\s\n]*#(\d+)[\s:\n]/);
+            if (numMatch) {
+                const num = parseInt(numMatch[1]);
+                const content = part.replace(/^[\s\n]*#\d+[\s:\n]*/, '').trim();
+                
+                if (num >= startIndex && num <= endIndex && content) {
+                    result[num] = content;
+                }
             }
         }
     }
     
-    // 모든 패턴 실패 시
+    // 방법 2도 실패 시, 방법 3: 순서 기반 파싱 (AI가 #0부터 시작한 경우)
+    if (Object.keys(result).length === 0 && headers.length > 0) {
+        log(`Trying order-based mapping (AI started from #0?)`);
+        
+        // 헤더 순서대로 요청 인덱스에 매핑
+        const requestedIndices = [];
+        for (let i = startIndex; i <= endIndex; i++) {
+            requestedIndices.push(i);
+        }
+        
+        for (let i = 0; i < Math.min(headers.length, requestedIndices.length); i++) {
+            const header = headers[i];
+            const nextPos = (i + 1 < headers.length) 
+                ? cleanResponse.lastIndexOf('\n', headers[i + 1].endPos - 10)
+                : cleanResponse.length;
+            
+            const content = cleanResponse.substring(header.endPos, nextPos).trim();
+            if (content) {
+                result[requestedIndices[i]] = content;
+                log(`Mapped AI's #${header.num} to requested #${requestedIndices[i]}`);
+            }
+        }
+    }
+    
+    // 파싱 결과 로깅
     if (Object.keys(result).length === 0) {
         log(`Failed to parse API response. First 500 chars: ${cleanResponse.substring(0, 500)}`);
-        // 전체 응답을 첫 번째 메시지에 임시 할당
-        if (response.trim()) {
-            result[startIndex] = response.trim();
-        }
     } else {
-        log(`Successfully parsed ${Object.keys(result).length} summaries`);
+        log(`Successfully parsed ${Object.keys(result).length}/${endIndex - startIndex + 1} summaries`);
     }
     
     return result;
@@ -764,7 +884,7 @@ export async function runSummary(customStart = null, customEnd = null, onProgres
                         await saveSummaryData();
                     }
                 } else {
-                    // 개별 모드: 기존 로직
+                    // 개별 모드: 파싱 성공한 것만 저장, 실패한 것은 마커
                     const prompt = buildSummaryPrompt(messagesToSummarize, indicesToProcess[0]);
                     const response = await callSummaryAPI(prompt);
                     
@@ -773,8 +893,19 @@ export async function runSummary(customStart = null, customEnd = null, onProgres
                     if (response) {
                         const parsed = parseApiResponse(response, indicesToProcess[0], indicesToProcess[indicesToProcess.length - 1]);
                         
-                        for (const [index, content] of Object.entries(parsed)) {
-                            setSummaryForMessage(parseInt(index), content);
+                        // 각 인덱스별로 처리: 파싱 성공/실패 구분
+                        for (const idx of indicesToProcess) {
+                            if (parsed[idx]) {
+                                // 파싱 성공: 개별 불완전 여부 체크
+                                if (isIncompleteSummary(parsed[idx])) {
+                                    setSummaryForMessage(idx, `[⚠️ 불완전한 요약 - 재요약 권장]\n${parsed[idx]}`);
+                                } else {
+                                    setSummaryForMessage(idx, parsed[idx]);
+                                }
+                            } else {
+                                // 파싱 실패: 실패 마커 저장
+                                setSummaryForMessage(idx, `[❌ 요약 파싱 실패 - 재요약 필요]`);
+                            }
                             processedCount++;
                         }
                         
@@ -955,13 +1086,13 @@ export async function resummarizeMessage(messageIndex) {
     let startIdx, endIdx;
     
     if (groupMatch) {
-        // 이 메시지가 그룹 요약의 시작점
-        startIdx = parseInt(groupMatch[1]) - 1; // 0-based
-        endIdx = parseInt(groupMatch[2]) - 1;
+        // 이 메시지가 그룹 요약의 시작점 - 이미 0-indexed로 저장됨
+        startIdx = parseInt(groupMatch[1]);
+        endIdx = parseInt(groupMatch[2]);
     } else if (includedMatch) {
-        // 이 메시지가 다른 그룹에 포함됨
-        startIdx = parseInt(includedMatch[1]) - 1;
-        endIdx = parseInt(includedMatch[2]) - 1;
+        // 이 메시지가 다른 그룹에 포함됨 - 이미 0-indexed로 저장됨
+        startIdx = parseInt(includedMatch[1]);
+        endIdx = parseInt(includedMatch[2]);
     } else {
         // 개별 요약 - 단일 메시지만 재생성
         startIdx = messageIndex;
