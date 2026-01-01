@@ -253,23 +253,25 @@ Analyze the provided single message and extract/summarize information according 
    - Example: Previous was "연인" → Write "연인" (NOT "동일", "동일함", "same", or "unchanged")
    - Only write a NEW value when there is a clear, definite change in the story
 
+
 ## ⚠️ CRITICAL: Output Format Rules
 **YOU MUST follow this EXACT format. Any deviation will cause parsing failure.**
 
-1. Start each category line with "* " (asterisk + space)
-2. Use format: "* CategoryLabel: content"
-3. Do NOT use markdown bold (**), bullets (-), numbered lists, or other decorations
-4. Do NOT skip any enabled categories
-5. Keep category content compact (can span multiple lines if needed)
-
-WRONG examples:
-- **CategoryLabel:** content  ❌ (no bold)
-- - CategoryLabel: content    ❌ (no dash)
-- CategoryLabel: content      ❌ (no asterisk)
-- *CategoryLabel: content     ❌ (needs space)
+1. Start each group with "#StartNum" on its own line
+2. Start each category line with "* " (asterisk + space)
+3. Use format: "* CategoryLabel: content"
+4. Separate groups with blank line
+5. Do NOT use markdown bold (**), bullets (-), or other decorations
+6. Do NOT skip any enabled categories
 
 CORRECT example:
-* CategoryLabel: content      ✅`;
+#0
+* Scenario: content here
+* Location: content here
+
+#1
+* Scenario: content here
+* Location: content here`;
 
 // 묶음 요약 - 사용자 수정 가능 부분 (지침만)
 export const DEFAULT_BATCH_PROMPT_TEMPLATE = `You are a skilled writer and editor who weaves extensive roleplay logs into a cohesive narrative flow.
