@@ -1,5 +1,5 @@
 /**
- * 시나리오 자동요약 확장 프로그램 v1.04
+ * 시나리오 자동요약 확장 프로그램 v1.1.0
  * SillyTavern 네이티브 확장 - chatMetadata 저장 방식
  * 
  * 주요 기능:
@@ -21,7 +21,8 @@ import { registerEventListeners, updateEventListeners, setStatusUpdateCallback }
 import { applyMessageVisibility } from './src/visibility.js';
 import { injectSummaryToPrompt } from './src/injection.js';
 import { 
-    openPopup, closePopup, bindUIEvents, updateStatusDisplay, updateUIFromSettings, updateApiDisplay, initTokenCounter 
+    openPopup, closePopup, bindUIEvents, updateStatusDisplay, updateUIFromSettings, updateApiDisplay, initTokenCounter,
+    renderCharactersList, renderEventsList, renderItemsList
 } from './src/ui.js';
 
 /**
@@ -158,6 +159,10 @@ async function init() {
     // 상태 업데이트 콜백 설정
     setStatusUpdateCallback(() => {
         updateStatusDisplay();
+        // 도감 탭 데이터도 갱신 (채팅 변경 시)
+        renderCharactersList();
+        renderEventsList();
+        renderItemsList();
     });
     
     // 이벤트 리스너 등록
@@ -192,6 +197,23 @@ jQuery(async () => {
         }, 1000);
     });
 });
+
+// 디버그용 전역 객체 (개발/문제해결용)
+import { getCharacters, getRelevantCharacters, getEvents, getRelevantEvents, getItems, getRelevantItems, formatCharactersText } from './src/storage.js';
+import { getInjectionPreview } from './src/injection.js';
+
+window.SummarizerDebug = {
+    getCharacters,
+    getRelevantCharacters,
+    getEvents,
+    getRelevantEvents,
+    getItems,
+    getRelevantItems,
+    formatCharactersText,
+    getInjectionPreview,
+    getContext,
+    getSummaryData
+};
 
 // 외부 export (필요시)
 export { extensionName };

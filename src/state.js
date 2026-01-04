@@ -22,16 +22,65 @@ const errorLogs = [];
 const MAX_ERROR_LOGS = 50;
 
 /**
+ * 에러의 cause 체인을 추출
+ * @param {Error} error - 에러 객체
+ * @returns {Array} cause 체인 배열
+ */
+function extractErrorCauseChain(error) {
+    const causes = [];
+    let current = error?.cause;
+    let depth = 0;
+    const MAX_DEPTH = 5; // 무한 루프 방지
+    
+    while (current && depth < MAX_DEPTH) {
+        if (current instanceof Error) {
+            causes.push({
+                message: current.message,
+                name: current.name || 'Error'
+            });
+            current = current.cause;
+        } else if (typeof current === 'string') {
+            causes.push({ message: current, name: 'Error' });
+            break;
+        } else if (typeof current === 'object' && current.message) {
+            causes.push({
+                message: current.message,
+                name: current.name || 'Error'
+            });
+            current = current.cause;
+        } else {
+            causes.push({ message: String(current), name: 'Unknown' });
+            break;
+        }
+        depth++;
+    }
+    
+    return causes;
+}
+
+/**
  * 에러 로그 추가
  * @param {string} context - 에러 발생 위치
  * @param {Error|string} error - 에러 객체 또는 메시지
  * @param {Object} details - 추가 정보 (optional)
  */
 export function logError(context, error, details = {}) {
+    // cause 체인 추출
+    const causeChain = error instanceof Error ? extractErrorCauseChain(error) : [];
+    
+    // 전체 에러 메시지 구성 (원본 + cause 체인)
+    let fullMessage = error instanceof Error ? error.message : String(error);
+    if (causeChain.length > 0) {
+        const causeMessages = causeChain.map(c => `[${c.name}] ${c.message}`).join(' → ');
+        fullMessage += ` | 원인: ${causeMessages}`;
+    }
+    
     const errorEntry = {
         timestamp: new Date().toISOString(),
         context,
-        message: error instanceof Error ? error.message : String(error),
+        message: fullMessage,
+        originalMessage: error instanceof Error ? error.message : String(error),
+        causeChain,
         stack: error instanceof Error ? error.stack : null,
         details
     };
@@ -153,10 +202,10 @@ export function setChatLoadingCooldown(ms = 2000) {
     chatLoadingTimeout = setTimeout(() => {
         operationState.chatLoadingCooldown = false;
         chatLoadingTimeout = null;
-        log('Chat loading cooldown ended');
+        log('채팅 로딩 쿨다운 종료');
     }, ms);
     
-    log('Chat loading cooldown started');
+    log('채팅 로딩 쿨다운 시작');
 }
 
 /**

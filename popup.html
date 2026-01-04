@@ -23,7 +23,7 @@
                 <i class="fa-solid fa-chart-bar"></i> 상태
             </button>
             <button class="summarizer-tab" data-tab="characters">
-                <i class="fa-solid fa-users"></i> 인물
+                <i class="fa-solid fa-book"></i> 도감
             </button>
             <button class="summarizer-tab" data-tab="prompt">
                 <i class="fa-solid fa-code"></i> 프롬프트
@@ -109,6 +109,33 @@
                             <span class="summarizer-toggle-slider"></span>
                         </label>
                     </div>
+                    
+                    <div class="summarizer-toggle-row">
+                        <span class="summarizer-toggle-label">
+                            이벤트 추적
+                            <small class="summarizer-hint">요약 시 주요 이벤트를 자동으로 추출·저장합니다</small>
+                        </span>
+                        <label class="summarizer-toggle">
+                            <input type="checkbox" id="summarizer-event-tracking" />
+                            <span class="summarizer-toggle-slider"></span>
+                        </label>
+                    </div>
+                    
+                    <div class="summarizer-toggle-row">
+                        <span class="summarizer-toggle-label">
+                            아이템 추적
+                            <small class="summarizer-hint">요약 시 주요 아이템을 자동으로 추출·저장합니다</small>
+                        </span>
+                        <label class="summarizer-toggle">
+                            <input type="checkbox" id="summarizer-item-tracking" />
+                            <span class="summarizer-toggle-slider"></span>
+                        </label>
+                    </div>
+                    
+                    <small class="summarizer-hint summarizer-hint-warning">
+                        <i class="fa-solid fa-circle-info"></i>
+                        추적 옵션을 많이 활성화할수록 요약 시 토큰 사용량이 증가합니다.
+                    </small>
                 </div>
                 
                 <!-- 프롬프트 주입 설정 -->
@@ -251,10 +278,12 @@
                         <label for="summarizer-ui-theme">컬러 테마</label>
                         <select id="summarizer-ui-theme" class="summarizer-select">
                             <option value="mono-gray">Mono Gray (모노 그레이)</option>
+                            <option value="dark-mono">Dark Mono (다크 모노)</option>
                             <option value="dusty-rose">Dusty Rose (더스티 로즈)</option>
                             <option value="ocean-breeze">Ocean Breeze (오션 브리즈)</option>
                             <option value="matcha-garden">Matcha Garden (말차 가든)</option>
-                            <option value="dark-mono">Dark Mono (다크 모노)</option>
+                            <option value="strawberry-milk">Strawberry Milk (딸기 우유)</option>
+                            <option value="butter-cream">Butter Cream (버터 크림)</option>
                         </select>
                         <small class="summarizer-hint">확장 UI의 색상 테마를 선택합니다</small>
                         
@@ -434,9 +463,24 @@
                             <div class="summarizer-stat-value" id="stat-hidden">0</div>
                             <div class="summarizer-stat-label">숨김</div>
                         </div>
+                        <div class="summarizer-stat-item summarizer-stat-error" id="stat-error-container" style="display: none;" title="클릭하여 파싱 실패 요약 일괄 재생성">
+                            <div class="summarizer-stat-value" id="stat-error">0</div>
+                            <div class="summarizer-stat-label">오류</div>
+                        </div>
                         <div class="summarizer-stat-item">
                             <div class="summarizer-stat-value" id="stat-next-trigger">-</div>
                             <div class="summarizer-stat-label">다음</div>
+                        </div>
+                    </div>
+                    
+                    <!-- 토큰 사용량 -->
+                    <div class="summarizer-token-usage">
+                        <div class="summarizer-token-header">
+                            <span>프롬프트 토큰</span>
+                            <span id="token-usage-text">0 / 0</span>
+                        </div>
+                        <div class="summarizer-token-bar">
+                            <div class="summarizer-token-fill" id="token-usage-fill"></div>
                         </div>
                     </div>
                 </div>
@@ -481,9 +525,6 @@
                         <button id="summarizer-run-now" class="summarizer-btn summarizer-btn-primary">
                             <i class="fa-solid fa-wand-magic-sparkles"></i> 지금 요약
                         </button>
-                        <button id="summarizer-view-summary" class="summarizer-btn summarizer-btn-secondary">
-                            <i class="fa-solid fa-eye"></i> 요약 보기
-                        </button>
                     </div>
                     
                     <!-- 진행 상태 -->
@@ -500,37 +541,47 @@
                     </div>
                 </div>
                 
-                <!-- 검색 -->
+                <!-- 요약 보기 -->
                 <div class="summarizer-section">
-                    <h4><i class="fa-solid fa-search"></i> 요약 검색</h4>
-                    <div class="summarizer-search-row">
-                        <input type="text" id="summarizer-search-input" placeholder="검색어를 입력하세요..." />
+                    <h4><i class="fa-solid fa-book-open"></i> 요약 보기</h4>
+                    <div class="summarizer-btn-group">
+                        <button id="summarizer-view-current" class="summarizer-btn summarizer-btn-secondary">
+                            <i class="fa-solid fa-comment"></i> 현재 요약
+                        </button>
+                        <button id="summarizer-view-legacy" class="summarizer-btn summarizer-btn-secondary">
+                            <i class="fa-solid fa-box-archive"></i> 인계된 요약
+                        </button>
+                    </div>
+                    
+                    <!-- 검색 -->
+                    <div class="summarizer-search-row" style="margin-top: 12px;">
+                        <input type="text" id="summarizer-search-input" placeholder="현재 요약에서 검색..." />
                         <button id="summarizer-search-btn" class="summarizer-btn summarizer-btn-secondary summarizer-btn-small">
                             <i class="fa-solid fa-search"></i>
                         </button>
                     </div>
-                </div>
-                
-                <!-- 요약 미리보기 -->
-                <div id="summarizer-preview" style="display: none;">
-                    <div class="summarizer-preview-header">
-                        <span>저장된 요약</span>
-                        <div class="summarizer-preview-actions">
-                            <button id="summarizer-copy-to-clipboard" class="summarizer-btn summarizer-btn-small summarizer-btn-secondary" title="클립보드에 복사">
-                                <i class="fa-solid fa-clipboard"></i>
-                            </button>
-                            <button id="summarizer-preview-close" class="summarizer-btn summarizer-btn-small summarizer-btn-secondary" title="닫기">
-                                <i class="fa-solid fa-times"></i>
+                    
+                    <!-- 요약 미리보기 -->
+                    <div id="summarizer-preview" style="display: none;">
+                        <div class="summarizer-preview-header">
+                            <span>저장된 요약</span>
+                            <div class="summarizer-preview-actions">
+                                <button id="summarizer-sort-toggle" class="summarizer-btn summarizer-btn-small summarizer-btn-secondary" title="정렬 순서 변경 (최신순/오래된순)">
+                                    <i class="fa-solid fa-arrow-down-wide-short"></i>
+                                </button>
+                                <button id="summarizer-preview-close" class="summarizer-btn summarizer-btn-small summarizer-btn-secondary" title="닫기">
+                                    <i class="fa-solid fa-times"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div id="summarizer-preview-content"></div>
+                        <div id="summarizer-pagination" class="summarizer-pagination" style="display: none;"></div>
+                        <div id="summarizer-page-jump" class="summarizer-page-jump" style="display: none;">
+                            <input type="number" id="summarizer-page-input" min="1" placeholder="페이지" />
+                            <button id="summarizer-page-go" class="summarizer-btn summarizer-btn-small summarizer-btn-secondary">
+                                <i class="fa-solid fa-arrow-right"></i> 이동
                             </button>
                         </div>
-                    </div>
-                    <div id="summarizer-preview-content"></div>
-                    <div id="summarizer-pagination" class="summarizer-pagination" style="display: none;"></div>
-                    <div id="summarizer-page-jump" class="summarizer-page-jump" style="display: none;">
-                        <input type="number" id="summarizer-page-input" min="1" placeholder="페이지" />
-                        <button id="summarizer-page-go" class="summarizer-btn summarizer-btn-small summarizer-btn-secondary">
-                            <i class="fa-solid fa-arrow-right"></i> 이동
-                        </button>
                     </div>
                 </div>
                 
@@ -538,6 +589,11 @@
                 <div class="summarizer-section">
                     <h4><i class="fa-solid fa-file-export"></i> 데이터 관리</h4>
                     <div class="summarizer-btn-group">
+                        <button id="summarizer-copy-to-clipboard" class="summarizer-btn summarizer-btn-secondary">
+                            <i class="fa-solid fa-clipboard"></i> 전체 복사
+                        </button>
+                    </div>
+                    <div class="summarizer-btn-group" style="margin-top: 8px;">
                         <button id="summarizer-export" class="summarizer-btn summarizer-btn-secondary">
                             <i class="fa-solid fa-download"></i> 내보내기
                         </button>
@@ -555,6 +611,40 @@
                     </button>
                 </div>
                 
+                <!-- 초기화 (위험 액션) -->
+                <div class="summarizer-section">
+                    <h4><i class="fa-solid fa-rotate-left"></i> 초기화</h4>
+                    <label class="summarizer-checkbox-item summarizer-checkbox-all">
+                        <input type="checkbox" id="reset-select-all" />
+                        <span>전체 선택</span>
+                    </label>
+                    <div class="summarizer-checkbox-group summarizer-checkbox-compact">
+                        <label class="summarizer-checkbox-item">
+                            <input type="checkbox" id="reset-current-summary" class="reset-item" />
+                            <span>현재 요약</span>
+                        </label>
+                        <label class="summarizer-checkbox-item">
+                            <input type="checkbox" id="reset-legacy-summary" class="reset-item" />
+                            <span>인계된 요약</span>
+                        </label>
+                        <label class="summarizer-checkbox-item">
+                            <input type="checkbox" id="reset-characters" class="reset-item" />
+                            <span>등장인물 목록</span>
+                        </label>
+                        <label class="summarizer-checkbox-item">
+                            <input type="checkbox" id="reset-events" class="reset-item" />
+                            <span>주요 이벤트</span>
+                        </label>
+                        <label class="summarizer-checkbox-item">
+                            <input type="checkbox" id="reset-items" class="reset-item" />
+                            <span>주요 아이템</span>
+                        </label>
+                    </div>
+                    <button id="summarizer-selective-reset" class="summarizer-btn summarizer-btn-danger summarizer-btn-full" style="margin-top: 8px;">
+                        <i class="fa-solid fa-trash"></i> 선택 항목 초기화
+                    </button>
+                </div>
+                
                 <!-- 에러 로그 -->
                 <div class="summarizer-section">
                     <h4><i class="fa-solid fa-bug"></i> 에러 로그</h4>
@@ -567,19 +657,6 @@
                         </button>
                     </div>
                     <div id="summarizer-error-log" class="summarizer-error-log" style="display: none;"></div>
-                </div>
-                
-                <!-- 초기화 (위험 액션) -->
-                <div class="summarizer-section">
-                    <h4><i class="fa-solid fa-rotate-left"></i> 초기화</h4>
-                    <div class="summarizer-btn-group">
-                        <button id="summarizer-reset-summaries" class="summarizer-btn summarizer-btn-danger">
-                            <i class="fa-solid fa-eraser"></i> 요약만 초기화
-                        </button>
-                        <button id="summarizer-reset" class="summarizer-btn summarizer-btn-danger">
-                            <i class="fa-solid fa-trash"></i> 요약 & 인물 초기화
-                        </button>
-                    </div>
                 </div>
                 
             </div>
@@ -595,14 +672,22 @@
                         <p class="summarizer-placeholder">등록된 등장인물이 없습니다.</p>
                     </div>
                     
-                    <div class="summarizer-btn-group" style="margin-top: 16px;">
-                        <button id="summarizer-extract-characters" class="summarizer-btn summarizer-btn-primary">
-                            <i class="fa-solid fa-wand-magic-sparkles"></i> AI로 추출
-                        </button>
+                    <div class="summarizer-btn-group summarizer-btn-grid-mobile" style="margin-top: 16px;">
                         <button id="summarizer-add-character" class="summarizer-btn summarizer-btn-secondary">
                             <i class="fa-solid fa-plus"></i> 수동 추가
                         </button>
+                        <button id="summarizer-export-characters" class="summarizer-btn summarizer-btn-secondary" title="클립보드에 복사">
+                            <i class="fa-solid fa-clipboard"></i> 복사
+                        </button>
+                        <button id="summarizer-export-characters-file" class="summarizer-btn summarizer-btn-secondary" title="JSON 파일로 내보내기">
+                            <i class="fa-solid fa-download"></i> 내보내기
+                        </button>
+                        <button id="summarizer-import-characters" class="summarizer-btn summarizer-btn-secondary" title="JSON 파일에서 가져오기">
+                            <i class="fa-solid fa-upload"></i> 가져오기
+                        </button>
                     </div>
+                    
+                    <input type="file" id="summarizer-characters-file-input" accept=".json" style="display: none;" />
                 </div>
                 
                 <!-- 새 등장인물 추가/수정 폼 -->
@@ -644,6 +729,11 @@
                         <input type="text" id="character-relationship" placeholder="예: 소꿉친구, 라이벌, 처음 만남" />
                     </div>
                     
+                    <div class="summarizer-input-group">
+                        <label for="character-first-appearance">첫 등장 시점 (메시지 #)</label>
+                        <input type="number" id="character-first-appearance" min="0" placeholder="선택사항 - 분기 대응용" />
+                    </div>
+                    
                     <div class="summarizer-btn-group">
                         <button id="summarizer-save-character" class="summarizer-btn summarizer-btn-success">
                             <i class="fa-solid fa-check"></i> 저장
@@ -654,26 +744,143 @@
                     </div>
                 </div>
                 
-                <!-- 등장인물 관리 -->
+                <!-- ===== 주요 이벤트 섹션 ===== -->
                 <div class="summarizer-section">
-                    <h4><i class="fa-solid fa-gear"></i> 등장인물 관리</h4>
+                    <h4><i class="fa-solid fa-flag"></i> 주요 이벤트</h4>
                     
-                    <div class="summarizer-btn-group">
-                        <button id="summarizer-export-characters" class="summarizer-btn summarizer-btn-secondary" title="클립보드에 복사">
+                    <div id="summarizer-events-list" class="summarizer-events-list">
+                        <p class="summarizer-placeholder">등록된 이벤트가 없습니다.</p>
+                    </div>
+                    
+                    <div class="summarizer-btn-group summarizer-btn-grid-mobile" style="margin-top: 16px;">
+                        <button id="summarizer-add-event" class="summarizer-btn summarizer-btn-secondary">
+                            <i class="fa-solid fa-plus"></i> 이벤트 추가
+                        </button>
+                        <button id="summarizer-export-events" class="summarizer-btn summarizer-btn-secondary" title="클립보드에 복사">
                             <i class="fa-solid fa-clipboard"></i> 복사
                         </button>
-                        <button id="summarizer-export-characters-file" class="summarizer-btn summarizer-btn-secondary" title="JSON 파일로 내보내기">
+                        <button id="summarizer-export-events-file" class="summarizer-btn summarizer-btn-secondary" title="JSON 파일로 내보내기">
                             <i class="fa-solid fa-download"></i> 내보내기
                         </button>
-                        <button id="summarizer-import-characters" class="summarizer-btn summarizer-btn-secondary" title="JSON 파일에서 가져오기">
+                        <button id="summarizer-import-events" class="summarizer-btn summarizer-btn-secondary" title="JSON 파일에서 가져오기">
                             <i class="fa-solid fa-upload"></i> 가져오기
                         </button>
                     </div>
                     
-                    <button id="summarizer-clear-characters" class="summarizer-btn summarizer-btn-danger summarizer-btn-full" style="margin-top: 12px;">
-                        <i class="fa-solid fa-trash"></i> 등장인물 초기화
-                    </button>
-                    <input type="file" id="summarizer-characters-file-input" accept=".json" style="display: none;" />
+                    <input type="file" id="summarizer-events-file-input" accept=".json" style="display: none;" />
+                </div>
+                
+                <!-- 이벤트 추가/수정 폼 -->
+                <div class="summarizer-section" id="summarizer-event-form" style="display: none;">
+                    <h4><i class="fa-solid fa-calendar-plus"></i> <span id="event-form-title">이벤트 추가</span></h4>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="event-title">이벤트 제목 *</label>
+                        <input type="text" id="event-title" placeholder="예: 첫 만남, 약혼 발표" />
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="event-description">상세 설명</label>
+                        <textarea id="event-description" rows="3" placeholder="이벤트에 대한 상세 설명"></textarea>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="event-participants">관련 인물 (쉼표로 구분)</label>
+                        <input type="text" id="event-participants" placeholder="예: {{user}}, {{char}}" />
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="event-importance">중요도</label>
+                        <select id="event-importance" class="summarizer-select">
+                            <option value="high">높음</option>
+                            <option value="medium" selected>보통</option>
+                            <option value="low">낮음</option>
+                        </select>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="event-message-index">발생 시점 (메시지 #)</label>
+                        <input type="number" id="event-message-index" min="0" placeholder="선택사항" />
+                    </div>
+                    
+                    <div class="summarizer-btn-group">
+                        <button id="summarizer-save-event" class="summarizer-btn summarizer-btn-success">
+                            <i class="fa-solid fa-check"></i> 저장
+                        </button>
+                        <button id="summarizer-cancel-event" class="summarizer-btn summarizer-btn-secondary">
+                            <i class="fa-solid fa-xmark"></i> 취소
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- ===== 주요 아이템 섹션 ===== -->
+                <div class="summarizer-section">
+                    <h4><i class="fa-solid fa-gem"></i> 주요 아이템</h4>
+                    
+                    <div id="summarizer-items-list" class="summarizer-items-list">
+                        <p class="summarizer-placeholder">등록된 아이템이 없습니다.</p>
+                    </div>
+                    
+                    <div class="summarizer-btn-group summarizer-btn-grid-mobile" style="margin-top: 16px;">
+                        <button id="summarizer-add-item" class="summarizer-btn summarizer-btn-secondary">
+                            <i class="fa-solid fa-plus"></i> 아이템 추가
+                        </button>
+                        <button id="summarizer-export-items" class="summarizer-btn summarizer-btn-secondary" title="클립보드에 복사">
+                            <i class="fa-solid fa-clipboard"></i> 복사
+                        </button>
+                        <button id="summarizer-export-items-file" class="summarizer-btn summarizer-btn-secondary" title="JSON 파일로 내보내기">
+                            <i class="fa-solid fa-download"></i> 내보내기
+                        </button>
+                        <button id="summarizer-import-items" class="summarizer-btn summarizer-btn-secondary" title="JSON 파일에서 가져오기">
+                            <i class="fa-solid fa-upload"></i> 가져오기
+                        </button>
+                    </div>
+                    
+                    <input type="file" id="summarizer-items-file-input" accept=".json" style="display: none;" />
+                </div>
+                
+                <!-- 아이템 추가/수정 폼 -->
+                <div class="summarizer-section" id="summarizer-item-form" style="display: none;">
+                    <h4><i class="fa-solid fa-wand-sparkles"></i> <span id="item-form-title">아이템 추가</span></h4>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="item-name">아이템 이름 *</label>
+                        <input type="text" id="item-name" placeholder="예: 약혼반지, 여행 기념품" />
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="item-description">설명/의미</label>
+                        <textarea id="item-description" rows="2" placeholder="아이템의 의미나 설명"></textarea>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="item-owner">현재 소유자</label>
+                        <input type="text" id="item-owner" placeholder="예: {{user}}" />
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="item-status">상태</label>
+                        <input type="text" id="item-status" placeholder="예: 보유중, 착용 중, 분실" />
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="item-origin">획득 경위</label>
+                        <input type="text" id="item-origin" placeholder="예: {{char}}에게 선물받음" />
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="item-message-index">획득 시점 (메시지 #)</label>
+                        <input type="number" id="item-message-index" min="0" placeholder="선택사항 - 분기 대응용" />
+                    </div>
+                    
+                    <div class="summarizer-btn-group">
+                        <button id="summarizer-save-item" class="summarizer-btn summarizer-btn-success">
+                            <i class="fa-solid fa-check"></i> 저장
+                        </button>
+                        <button id="summarizer-cancel-item" class="summarizer-btn summarizer-btn-secondary">
+                            <i class="fa-solid fa-xmark"></i> 취소
+                        </button>
+                    </div>
                 </div>
                 
             </div>
@@ -690,7 +897,13 @@
                         <i class="fa-solid fa-layer-group"></i> 묶음 요약
                     </button>
                     <button class="summarizer-prompt-subtab" data-prompt-type="character">
-                        <i class="fa-solid fa-users"></i> 등장인물 추출
+                        <i class="fa-solid fa-users"></i> 등장인물
+                    </button>
+                    <button class="summarizer-prompt-subtab" data-prompt-type="event">
+                        <i class="fa-solid fa-flag"></i> 이벤트
+                    </button>
+                    <button class="summarizer-prompt-subtab" data-prompt-type="item">
+                        <i class="fa-solid fa-gem"></i> 아이템
                     </button>
                 </div>
                 
@@ -752,7 +965,7 @@
                     <h4><i class="fa-solid fa-layer-group"></i> 묶음 요약 프롬프트</h4>
                     <small class="summarizer-hint">
                         AI에게 전달할 <strong>요약 지침</strong>을 작성하세요.<br/>
-                        등장인물, 메시지, 출력 형식은 시스템이 자동으로 추가합니다.
+                        메시지와 출력 형식은 시스템이 자동으로 추가합니다.
                     </small>
                     
                     <textarea id="summarizer-batch-prompt-template" class="summarizer-prompt-textarea" rows="10"></textarea>
@@ -787,13 +1000,58 @@
                     </div>
                 </div>
                 
-                <!-- 프롬프트 구조 안내 -->
-                <div class="summarizer-section summarizer-prompt-structure-info">
-                    <h4><i class="fa-solid fa-info-circle"></i> 프롬프트 구조 안내</h4>
-                    <p class="summarizer-hint" style="margin-bottom: 16px;">
-                        AI에게 전송되는 최종 프롬프트는 다음 순서로 자동 구성됩니다:
-                    </p>
-                    <div class="summarizer-prompt-structure-box">
+                <!-- 이벤트 추출 프롬프트 -->
+                <div class="summarizer-section summarizer-prompt-section" id="prompt-section-event" style="display: none;">
+                    <h4><i class="fa-solid fa-flag"></i> 이벤트 추출 프롬프트</h4>
+                    <small class="summarizer-hint">
+                        AI에게 전달할 <strong>이벤트 추출 지침</strong>을 작성하세요.<br/>
+                        메시지와 출력 형식은 시스템이 자동으로 추가합니다.
+                    </small>
+                    
+                    <textarea id="summarizer-event-prompt-template" class="summarizer-prompt-textarea" rows="10"></textarea>
+                    
+                    <div class="summarizer-btn-group">
+                        <button id="summarizer-save-event-prompt" class="summarizer-btn summarizer-btn-primary">
+                            <i class="fa-solid fa-floppy-disk"></i> 저장
+                        </button>
+                        <button id="summarizer-reset-event-prompt" class="summarizer-btn summarizer-btn-secondary">
+                            <i class="fa-solid fa-rotate-left"></i> 기본값으로
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 아이템 추출 프롬프트 -->
+                <div class="summarizer-section summarizer-prompt-section" id="prompt-section-item" style="display: none;">
+                    <h4><i class="fa-solid fa-gem"></i> 아이템 추출 프롬프트</h4>
+                    <small class="summarizer-hint">
+                        AI에게 전달할 <strong>아이템 추출 지침</strong>을 작성하세요.<br/>
+                        메시지와 출력 형식은 시스템이 자동으로 추가합니다.
+                    </small>
+                    
+                    <textarea id="summarizer-item-prompt-template" class="summarizer-prompt-textarea" rows="10"></textarea>
+                    
+                    <div class="summarizer-btn-group">
+                        <button id="summarizer-save-item-prompt" class="summarizer-btn summarizer-btn-primary">
+                            <i class="fa-solid fa-floppy-disk"></i> 저장
+                        </button>
+                        <button id="summarizer-reset-item-prompt" class="summarizer-btn summarizer-btn-secondary">
+                            <i class="fa-solid fa-rotate-left"></i> 기본값으로
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 프롬프트 구조 안내 (접이식) -->
+                <details class="summarizer-prompt-structure-details">
+                    <summary class="summarizer-prompt-structure-summary">
+                        <i class="fa-solid fa-info-circle"></i>
+                        <span>프롬프트 구조 안내</span>
+                        <i class="fa-solid fa-chevron-down summarizer-details-chevron"></i>
+                    </summary>
+                    <div class="summarizer-prompt-structure-content">
+                        <p class="summarizer-hint">
+                            AI에게 전송되는 최종 프롬프트는 다음 순서로 자동 구성됩니다:
+                        </p>
+                        <div class="summarizer-prompt-structure-box">
                         <div class="summarizer-prompt-structure-item">
                             <div class="summarizer-structure-header">
                                 <span class="summarizer-structure-number">1</span>
@@ -829,10 +1087,10 @@
                         <div class="summarizer-prompt-structure-item">
                             <div class="summarizer-structure-header">
                                 <span class="summarizer-structure-number">5</span>
-                                <span class="summarizer-structure-label">기존 등장인물</span>
+                                <span class="summarizer-structure-label">기존 도감 데이터</span>
                                 <span class="summarizer-structure-auto">자동</span>
                             </div>
-                            <span class="summarizer-structure-desc">저장된 캐릭터 정보</span>
+                            <span class="summarizer-structure-desc">저장된 등장인물/이벤트/아이템 정보</span>
                         </div>
                         <div class="summarizer-prompt-structure-item">
                             <div class="summarizer-structure-header">
@@ -848,7 +1106,7 @@
                                 <span class="summarizer-structure-label">출력 형식</span>
                                 <span class="summarizer-structure-auto">자동</span>
                             </div>
-                            <span class="summarizer-structure-desc">파싱용 형식 (카테고리, 캐릭터 JSON)</span>
+                            <span class="summarizer-structure-desc">요약 항목 출력 형식</span>
                         </div>
                         <div class="summarizer-prompt-structure-item">
                             <div class="summarizer-structure-header">
@@ -856,13 +1114,146 @@
                                 <span class="summarizer-structure-label">캐릭터 추출 블록</span>
                                 <span class="summarizer-structure-auto">자동</span>
                             </div>
-                            <span class="summarizer-structure-desc">새 등장인물 자동 추출 지침</span>
+                            <span class="summarizer-structure-desc">새 등장인물 자동 추출 지침 (토글 활성화 시)</span>
+                        </div>
+                        <div class="summarizer-prompt-structure-item">
+                            <div class="summarizer-structure-header">
+                                <span class="summarizer-structure-number">9</span>
+                                <span class="summarizer-structure-label">이벤트 추출 블록</span>
+                                <span class="summarizer-structure-auto">자동</span>
+                            </div>
+                            <span class="summarizer-structure-desc">주요 이벤트 자동 추출 지침 (토글 활성화 시)</span>
+                        </div>
+                        <div class="summarizer-prompt-structure-item">
+                            <div class="summarizer-structure-header">
+                                <span class="summarizer-structure-number">10</span>
+                                <span class="summarizer-structure-label">아이템 추출 블록</span>
+                                <span class="summarizer-structure-auto">자동</span>
+                            </div>
+                            <span class="summarizer-structure-desc">주요 아이템 자동 추출 지침 (토글 활성화 시)</span>
                         </div>
                     </div>
-                </div>
+                </details>
     
             </div>
             
+        </div>
+    </div>
+    
+    <!-- 요약 가져오기 모달 -->
+    <div id="summarizer-import-modal" class="summarizer-modal" style="display: none;">
+        <div class="summarizer-modal-overlay"></div>
+        <div class="summarizer-modal-content">
+            <div class="summarizer-modal-header">
+                <h4><i class="fa-solid fa-upload"></i> 요약 파일 가져오기</h4>
+                <button class="summarizer-modal-close" id="summarizer-import-modal-close">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="summarizer-modal-body">
+                <div class="summarizer-modal-file-section">
+                    <label for="summarizer-import-file-input" class="summarizer-file-label">
+                        <i class="fa-solid fa-file-import"></i>
+                        <span id="summarizer-import-file-name">파일을 선택하세요</span>
+                    </label>
+                    <input type="file" id="summarizer-import-file-input" accept=".json" style="display: none;" />
+                </div>
+                
+                <div class="summarizer-modal-options">
+                    <p class="summarizer-modal-option-title">가져오기 방식 선택:</p>
+                    
+                    <label class="summarizer-radio-item">
+                        <input type="radio" name="import-mode" value="merge" checked />
+                        <span class="summarizer-radio-mark"></span>
+                        <div class="summarizer-radio-content">
+                            <strong>현재 채팅에 병합</strong>
+                            <small>메시지 인덱스를 매칭하여 기존 요약에 병합합니다</small>
+                        </div>
+                    </label>
+                    
+                    <label class="summarizer-radio-item">
+                        <input type="radio" name="import-mode" value="legacy" />
+                        <span class="summarizer-radio-mark"></span>
+                        <div class="summarizer-radio-content">
+                            <strong>인계된 요약으로 불러오기</strong>
+                            <small class="summarizer-text-warning">
+                                <i class="fa-solid fa-triangle-exclamation"></i>
+                                새 채팅방에서 이전 채팅방의 요약을 불러 올 때 선택하세요
+                            </small>
+                        </div>
+                    </label>
+                    
+                    <label class="summarizer-radio-item">
+                        <input type="radio" name="import-mode" value="full" />
+                        <span class="summarizer-radio-mark"></span>
+                        <div class="summarizer-radio-content">
+                            <strong>전체 불러오기</strong>
+                            <small>현재/인계된 요약 + 인물/이벤트/아이템을 전부 복원합니다</small>
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div class="summarizer-modal-footer">
+                <button id="summarizer-import-cancel" class="summarizer-btn summarizer-btn-secondary">
+                    취소
+                </button>
+                <button id="summarizer-import-confirm" class="summarizer-btn summarizer-btn-primary" disabled>
+                    <i class="fa-solid fa-upload"></i> 가져오기
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 요약 내보내기 모달 -->
+    <div id="summarizer-export-modal" class="summarizer-modal" style="display: none;">
+        <div class="summarizer-modal-overlay"></div>
+        <div class="summarizer-modal-content">
+            <div class="summarizer-modal-header">
+                <h4><i class="fa-solid fa-download"></i> 요약 내보내기</h4>
+                <button class="summarizer-modal-close" id="summarizer-export-modal-close">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="summarizer-modal-body">
+                <div class="summarizer-modal-options">
+                    <p class="summarizer-modal-option-title">내보내기 대상 선택:</p>
+                    
+                    <label class="summarizer-radio-item">
+                        <input type="radio" name="export-mode" value="current" checked />
+                        <span class="summarizer-radio-mark"></span>
+                        <div class="summarizer-radio-content">
+                            <strong>현재 채팅방 요약</strong>
+                            <small>현재 채팅의 요약만 내보냅니다</small>
+                        </div>
+                    </label>
+                    
+                    <label class="summarizer-radio-item">
+                        <input type="radio" name="export-mode" value="legacy" />
+                        <span class="summarizer-radio-mark"></span>
+                        <div class="summarizer-radio-content">
+                            <strong>인계된 요약만</strong>
+                            <small>이전 채팅에서 인계된 요약만 내보냅니다</small>
+                        </div>
+                    </label>
+                    
+                    <label class="summarizer-radio-item">
+                        <input type="radio" name="export-mode" value="all" />
+                        <span class="summarizer-radio-mark"></span>
+                        <div class="summarizer-radio-content">
+                            <strong>전체 내보내기</strong>
+                            <small>현재/인계된 요약 + 인물/이벤트/아이템을 전부 내보냅니다</small>
+                        </div>
+                    </label>
+                </div>
+            </div>
+            <div class="summarizer-modal-footer">
+                <button id="summarizer-export-cancel" class="summarizer-btn summarizer-btn-secondary">
+                    취소
+                </button>
+                <button id="summarizer-export-confirm" class="summarizer-btn summarizer-btn-primary">
+                    <i class="fa-solid fa-download"></i> 내보내기
+                </button>
+            </div>
         </div>
     </div>
 </div>

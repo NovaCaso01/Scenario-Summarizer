@@ -37,7 +37,7 @@ function triggerStatusUpdate() {
 async function onChatChanged() {
     const settings = getSettings();
     
-    log('Chat changed');
+    log('채팅 변경됨');
     
     // 채팅 로딩 쿨다운 설정
     setChatLoadingCooldown(2000);
@@ -67,30 +67,30 @@ async function onChatChanged() {
 async function onMessageReceived(messageId) {
     const settings = getSettings();
     
-    log(`Message received: id=${messageId}, enabled=${settings.enabled}, automaticMode=${settings.automaticMode}`);
+    log(`메시지 수신: id=${messageId}, enabled=${settings.enabled}, automaticMode=${settings.automaticMode}`);
     
     // 비활성화, 수동 모드, 쿨다운 중이면 스킵
     if (!settings.enabled || !settings.automaticMode) {
-        log('Skipping auto-summary: disabled or manual mode');
+        log('자동 요약 스킵: 비활성화 또는 수동 모드');
         return;
     }
     
     if (isChatLoadingCooldown()) {
-        log('Skipping auto-summary: chat loading cooldown');
+        log('자동 요약 스킵: 채팅 로딩 쿨다운 중');
         return;
     }
     
     if (isSummarizing()) {
-        log('Skipping auto-summary: already summarizing');
+        log('자동 요약 스킵: 이미 요약 중');
         return;
     }
     
     if (isGenerationInProgress()) {
-        log('Skipping auto-summary: generation in progress');
+        log('자동 요약 스킵: AI 생성 진행 중');
         return;
     }
     
-    log('Calling runAutoSummary...');
+    log('자동 요약 실행 중...');
     // 자동 요약 실행
     await runAutoSummary();
     triggerStatusUpdate();
@@ -101,7 +101,7 @@ async function onMessageReceived(messageId) {
  */
 function onGenerationStarted() {
     setGenerationLock();
-    log('Generation started');
+    log('AI 생성 시작');
 }
 
 /**
@@ -109,7 +109,7 @@ function onGenerationStarted() {
  */
 function onGenerationEnded() {
     clearGenerationLock();
-    log('Generation ended');
+    log('AI 생성 종료');
 }
 
 /**
@@ -117,18 +117,18 @@ function onGenerationEnded() {
  */
 async function onGenerationEndedWithAutoSummary() {
     clearGenerationLock();
-    log('Generation ended, checking auto-summary...');
+    log('AI 생성 종료, 자동 요약 확인 중...');
     
     const settings = getSettings();
     
     // 비활성화, 수동 모드면 스킵
     if (!settings.enabled || !settings.automaticMode) {
-        log('Auto-summary skipped: disabled or manual mode');
+        log('자동 요약 스킵: 비활성화 또는 수동 모드');
         return;
     }
     
     if (isChatLoadingCooldown()) {
-        log('Auto-summary skipped: chat loading cooldown');
+        log('자동 요약 스킵: 채팅 로딩 쿨다운 중');
         return;
     }
     
@@ -136,15 +136,15 @@ async function onGenerationEndedWithAutoSummary() {
     setTimeout(async () => {
         try {
             if (isSummarizing()) {
-                log('Auto-summary skipped: already summarizing');
+                log('자동 요약 스킵: 이미 요약 중');
                 return;
             }
             
-            log('Running auto-summary from GENERATION_ENDED...');
+            log('GENERATION_ENDED에서 자동 요약 실행 중...');
             await runAutoSummary();
             triggerStatusUpdate();
         } catch (error) {
-            console.error('[scenario-summarizer] Auto-summary error:', error);
+            console.error('[scenario-summarizer] 자동 요약 오류:', error);
         }
     }, 500);
 }
@@ -205,7 +205,7 @@ let listenersRegistered = false;
  */
 export function registerEventListeners() {
     if (listenersRegistered) {
-        log('Event listeners already registered');
+        log('이벤트 리스너 이미 등록됨');
         return;
     }
     

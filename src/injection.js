@@ -4,23 +4,112 @@
 
 import { getContext, extension_settings } from "../../../../extensions.js";
 import { setExtensionPrompt, extension_prompt_types } from "../../../../../script.js";
-import { extensionName, getCharacterJsonCleanupPattern } from './constants.js';
+import { extensionName, getCharacterJsonCleanupPattern, getEventJsonCleanupPattern, getItemJsonCleanupPattern } from './constants.js';
 import { log, getSettings, logError } from './state.js';
-import { getSummaryData, getRelevantSummaries, getCharacterName, getRelevantCharacters, formatCharactersText } from './storage.js';
+import { getSummaryData, getRelevantSummaries, getCharacterName, getRelevantCharacters, formatCharactersText, getLegacySummaries, getRelevantEvents, getRelevantItems } from './storage.js';
 import { getTokenCounter } from './ui.js';
 
 // setExtensionPrompt 사용 가능 여부
 let extensionPromptAvailable = true;
 
 /**
- * 요약 콘텐츠에서 빈 CHARACTERS_JSON 블록 제거
+ * 이벤트 목록을 텍스트로 포맷팅 (분기 대응, 중요도 포함)
+ * @returns {string}
+ */
+function formatEventsText() {
+    const events = getRelevantEvents();
+    if (events.length === 0) return '';
+    
+    const settings = getSettings();
+    const lang = settings.summaryLanguage || 'ko';
+    
+    // 중요도 라벨 (영어 = 토큰 절약)
+    const importanceLabels = {
+        'high': lang === 'ko' ? '높음' : 'HIGH',
+        'medium': lang === 'ko' ? '중간' : 'MED',
+        'low': lang === 'ko' ? '낮음' : 'LOW'
+    };
+    
+    let text = '';
+    for (const event of events) {
+        // 중요도 태그
+        const importance = event.importance || 'medium';
+        const impLabel = importanceLabels[importance] || importanceLabels['medium'];
+        
+        text += `- [${impLabel}] ${event.title}`;
+        if (event.messageIndex !== null && event.messageIndex !== undefined) {
+            text += ` (#${event.messageIndex})`;
+        }
+        text += '\n';
+        if (event.description) {
+            text += `  ${event.description}\n`;
+        }
+    }
+    return text;
+}
+
+/**
+ * 아이템 목록을 텍스트로 포맷팅 (분기 대응, 중요도 포함)
+ * @returns {string}
+ */
+function formatItemsText() {
+    const items = getRelevantItems();
+    if (items.length === 0) return '';
+    
+    const settings = getSettings();
+    const lang = settings.summaryLanguage || 'ko';
+    
+    // 상태 라벨 (언어별)
+    const statusLabels = lang === 'ko' ? {
+        'possessed': '보유',
+        'used': '사용됨',
+        'lost': '분실',
+        'transferred': '양도'
+    } : {
+        'possessed': 'HELD',
+        'used': 'USED',
+        'lost': 'LOST',
+        'transferred': 'GIVEN'
+    };
+    
+    // 중요도 라벨 (영어 = 토큰 절약)
+    const importanceLabels = {
+        'high': lang === 'ko' ? '높음' : 'HIGH',
+        'medium': lang === 'ko' ? '중간' : 'MED',
+        'low': lang === 'ko' ? '낮음' : 'LOW'
+    };
+    
+    let text = '';
+    for (const item of items) {
+        const statusLabel = statusLabels[item.status] || item.status;
+        const importance = item.importance || 'medium';
+        const impLabel = importanceLabels[importance] || importanceLabels['medium'];
+        
+        text += `- [${impLabel}] ${item.name} [${statusLabel}]`;
+        if (item.owner) {
+            text += lang === 'ko' ? ` 소유:${item.owner}` : ` by:${item.owner}`;
+        }
+        text += '\n';
+        if (item.description) {
+            text += `  ${item.description}\n`;
+        }
+    }
+    return text;
+}
+
+/**
+ * 요약 콘텐츠에서 모든 JSON 블록 제거 (CHARACTERS, EVENTS, ITEMS)
  * @param {string} content - 요약 콘텐츠
  * @returns {string} - 정리된 콘텐츠
  */
 function cleanSummaryContent(content) {
     if (!content) return content;
-    // 모든 [CHARACTERS_JSON]...[/CHARACTERS_JSON] 블록 제거
-    return content.replace(getCharacterJsonCleanupPattern(), '').trim();
+    // 모든 JSON 블록 제거
+    let cleaned = content;
+    cleaned = cleaned.replace(getCharacterJsonCleanupPattern(), '');
+    cleaned = cleaned.replace(getEventJsonCleanupPattern(), '');
+    cleaned = cleaned.replace(getItemJsonCleanupPattern(), '');
+    return cleaned.trim();
 }
 
 /**
@@ -63,7 +152,7 @@ function safeSetExtensionPrompt(summaryContent, settings = null) {
             return true;
         } else {
             extensionPromptAvailable = false;
-            log('setExtensionPrompt not available');
+            log('setExtensionPrompt 사용 불가');
             return false;
         }
     } catch (error) {
@@ -92,10 +181,15 @@ export async function injectSummaryToPrompt() {
         }
         
         const summaries = getRelevantSummaries();
+        const legacySummaries = getLegacySummaries();
+        
         // 최신순(내림차순)으로 정렬하여 토큰 초과 시 오래된 요약이 제외되도록 함
         const summaryIndices = Object.keys(summaries).map(Number).sort((a, b) => b - a);
         
-        if (summaryIndices.length === 0) {
+        // 인계된 요약도 역순으로 (order 기준)
+        const legacyOrders = legacySummaries.map(s => s.order).sort((a, b) => b - a);
+        
+        if (summaryIndices.length === 0 && legacyOrders.length === 0) {
             safeSetExtensionPrompt('', settings);
             return;
         }
@@ -106,15 +200,36 @@ export async function injectSummaryToPrompt() {
         const getTokenCountAsync = getTokenCounter();
     
     // 토큰 예산 내에서 요약 구성
-    let summaryText = `[${charName} 시나리오 요약]\n`;
-    summaryText += `${"=".repeat(40)}\n\n`;
+    let summaryText = `# ${charName} Summary\n\n`;
     
     let estimatedTokens = getTokenCountAsync ? await getTokenCountAsync(summaryText) : Math.ceil(summaryText.length / 4);
     let includedCount = 0;
     let skippedCount = 0;
+    const includedLegacySummaries = [];
     const includedSummaries = [];
     
-    // 최신 것부터 추가하여 토큰 초과 시 오래된 요약이 제외되도록
+    // 1) 인계된 요약 먼저 처리 (최신 것부터 추가하여 토큰 초과 시 오래된 것 제외)
+    for (const order of legacyOrders) {
+        const legacy = legacySummaries.find(s => s.order === order);
+        if (!legacy) continue;
+        
+        const content = String(legacy.content ?? '');
+        if (!content.trim()) continue;
+        
+        const contentTokens = getTokenCountAsync ? await getTokenCountAsync(content) : Math.ceil(content.length / 4);
+        
+        // 토큰 예산 확인
+        if (estimatedTokens + contentTokens > tokenBudget) {
+            skippedCount++;
+            continue;
+        }
+        
+        includedLegacySummaries.push({ order, content, isLegacy: true });
+        estimatedTokens += contentTokens + 20;
+        includedCount++;
+    }
+    
+    // 2) 현재 채팅 요약 처리 (최신 것부터 추가)
     for (const index of summaryIndices) {
         const summary = summaries[index];
         const content = String(summary?.content ?? summary ?? '');
@@ -148,6 +263,24 @@ export async function injectSummaryToPrompt() {
         return;
     }
     
+    // 인계된 요약을 order 오름차순으로 정렬하여 시간순 출력
+    includedLegacySummaries.sort((a, b) => a.order - b.order);
+    
+    // 인계된 요약이 있으면 먼저 출력
+    if (includedLegacySummaries.length > 0) {
+        summaryText += `--- PREVIOUS STORY ---\n`;
+        for (const { order, content } of includedLegacySummaries) {
+            let cleanedContent = cleanSummaryContent(content);
+            // 그룹 요약인 경우 번호 범위 표시 제거
+            const rangeMatch = cleanedContent.match(/^#(\d+)-(\d+)/);
+            if (rangeMatch) {
+                cleanedContent = cleanedContent.replace(/^#\d+-\d+\n?/, '').trim();
+            }
+            summaryText += cleanedContent + "\n\n";
+        }
+        summaryText += `--- CURRENT STORY ---\n`;
+    }
+    
     // 포함된 요약을 오름차순으로 정렬하여 시간순으로 출력
     includedSummaries.sort((a, b) => a.index - b.index);
     
@@ -157,25 +290,43 @@ export async function injectSummaryToPrompt() {
         // 그룹 요약인 경우 번호 범위 표시
         const rangeMatch = cleanedContent.match(/^#(\d+)-(\d+)/);
         if (rangeMatch) {
-            summaryText += `--- #${rangeMatch[1]}~${rangeMatch[2]} ---\n`;
+            summaryText += `### #${rangeMatch[1]}~${rangeMatch[2]}\n`;
             // 내용에서 중복되는 #X-Y 헤더 제거
             cleanedContent = cleanedContent.replace(/^#\d+-\d+\n?/, '').trim();
         } else {
-            summaryText += `--- #${index} ---\n`;
+            summaryText += `### #${index}\n`;
         }
         summaryText += cleanedContent + "\n\n";
     }
     
     // 등장인물 정보 추가 (한 번만)
     const relevantCharacters = getRelevantCharacters();
-    if (relevantCharacters.length > 0) {
+    if (Object.keys(relevantCharacters).length > 0) {
         const charactersText = formatCharactersText(true);
         if (charactersText) {
-            summaryText += `[등장인물 정보]\n`;
+            summaryText += `\n--- CHARACTERS ---\n`;
             summaryText += charactersText + "\n";
             const charTokens = getTokenCountAsync ? await getTokenCountAsync(charactersText) : Math.ceil(charactersText.length / 4);
             estimatedTokens += charTokens;
         }
+    }
+    
+    // 주요 이벤트 정보 추가
+    const eventsText = formatEventsText();
+    if (eventsText) {
+        summaryText += `\n--- EVENTS ---\n`;
+        summaryText += eventsText + "\n";
+        const eventTokens = getTokenCountAsync ? await getTokenCountAsync(eventsText) : Math.ceil(eventsText.length / 4);
+        estimatedTokens += eventTokens;
+    }
+    
+    // 주요 아이템 정보 추가
+    const itemsText = formatItemsText();
+    if (itemsText) {
+        summaryText += `\n--- ITEMS ---\n`;
+        summaryText += itemsText + "\n";
+        const itemTokens = getTokenCountAsync ? await getTokenCountAsync(itemsText) : Math.ceil(itemsText.length / 4);
+        estimatedTokens += itemTokens;
     }
     
     if (skippedCount > 0) {
@@ -186,7 +337,9 @@ export async function injectSummaryToPrompt() {
     const success = safeSetExtensionPrompt(summaryText, settings);
     
     if (success) {
-        log(`Summary injected: ${includedCount} entries, ~${Math.round(estimatedTokens)} tokens`);
+        const legacyCount = includedLegacySummaries.length;
+        const currentCount = includedSummaries.length;
+        log(`Summary injected: ${legacyCount} legacy + ${currentCount} current entries, ~${Math.round(estimatedTokens)} tokens`);
     }
     } catch (error) {
         logError('injectSummaryToPrompt', error, { 
@@ -203,7 +356,7 @@ export async function injectSummaryToPrompt() {
 export function clearInjection() {
     const settings = getSettings();
     safeSetExtensionPrompt('', settings);
-    log('Summary injection cleared');
+    log('요약 주입 제거됨');
 }
 
 /**
@@ -214,10 +367,13 @@ export async function getInjectionPreview() {
     try {
         const settings = getSettings();
         const summaries = getRelevantSummaries();
+        const legacySummaries = getLegacySummaries();
+        
         // 최신순(내림차순)으로 정렬하여 토큰 초과 시 오래된 요약이 제외되도록 함
         const summaryIndices = Object.keys(summaries).map(Number).sort((a, b) => b - a);
+        const legacyOrders = legacySummaries.map(s => s.order).sort((a, b) => b - a);
         
-        if (summaryIndices.length === 0) {
+        if (summaryIndices.length === 0 && legacyOrders.length === 0) {
             return "(주입할 요약 없음)";
         }
         
@@ -226,13 +382,33 @@ export async function getInjectionPreview() {
         const tokenBudget = settings.tokenBudget || 2000;
         const getTokenCountAsync = getTokenCounter();
     
-    let text = `[${charName} 시나리오 요약]\n`;
-    text += `${"=".repeat(40)}\n\n`;
+    let text = `# ${charName} Summary\n\n`;
     
     let estimatedTokens = getTokenCountAsync ? await getTokenCountAsync(text) : Math.ceil(text.length / 4);
+    const includedLegacySummaries = [];
     const includedSummaries = [];
     let skippedFromBudget = 0;
     
+    // 1) 인계된 요약 먼저 처리
+    for (const order of legacyOrders) {
+        const legacy = legacySummaries.find(s => s.order === order);
+        if (!legacy) continue;
+        
+        const content = String(legacy.content ?? '');
+        if (!content.trim()) continue;
+        
+        const contentTokens = getTokenCountAsync ? await getTokenCountAsync(content) : Math.ceil(content.length / 4);
+        
+        if (estimatedTokens + contentTokens > tokenBudget) {
+            skippedFromBudget++;
+            continue;
+        }
+        
+        includedLegacySummaries.push({ order, content });
+        estimatedTokens += contentTokens + 20;
+    }
+    
+    // 2) 현재 채팅 요약 처리
     for (const index of summaryIndices) {
         const summary = summaries[index];
         const content = String(summary?.content ?? summary ?? '');
@@ -253,6 +429,23 @@ export async function getInjectionPreview() {
         estimatedTokens += contentTokens + 20;
     }
     
+    // 인계된 요약을 order 오름차순으로 정렬
+    includedLegacySummaries.sort((a, b) => a.order - b.order);
+    
+    // 인계된 요약 출력
+    if (includedLegacySummaries.length > 0) {
+        text += `--- PREVIOUS STORY ---\n`;
+        for (const { order, content } of includedLegacySummaries) {
+            let cleanedContent = cleanSummaryContent(content);
+            const rangeMatch = cleanedContent.match(/^#(\d+)-(\d+)/);
+            if (rangeMatch) {
+                cleanedContent = cleanedContent.replace(/^#\d+-\d+\n?/, '').trim();
+            }
+            text += cleanedContent + "\n\n";
+        }
+        text += `--- CURRENT STORY ---\n`;
+    }
+    
     // 포함된 요약을 오름차순으로 정렬하여 시간순으로 출력
     includedSummaries.sort((a, b) => a.index - b.index);
     
@@ -262,23 +455,37 @@ export async function getInjectionPreview() {
         // 그룹 요약인 경우 번호 범위 표시
         const rangeMatch = cleanedContent.match(/^#(\d+)-(\d+)/);
         if (rangeMatch) {
-            text += `--- #${rangeMatch[1]}~${rangeMatch[2]} ---\n`;
+            text += `### #${rangeMatch[1]}~${rangeMatch[2]}\n`;
             // 내용에서 중복되는 #X-Y 헤더 제거
             cleanedContent = cleanedContent.replace(/^#\d+-\d+\n?/, '').trim();
         } else {
-            text += `--- #${index} ---\n`;
+            text += `### #${index}\n`;
         }
         text += cleanedContent + "\n\n";
     }
     
     // 등장인물 정보 추가 (한 번만)
     const relevantCharacters = getRelevantCharacters();
-    if (relevantCharacters.length > 0) {
+    if (Object.keys(relevantCharacters).length > 0) {
         const charactersText = formatCharactersText(true);
         if (charactersText) {
-            text += `[등장인물 정보]\n`;
+            text += `\n--- CHARACTERS ---\n`;
             text += charactersText + "\n";
         }
+    }
+    
+    // 주요 이벤트 정보 추가
+    const eventsText = formatEventsText();
+    if (eventsText) {
+        text += `\n--- EVENTS ---\n`;
+        text += eventsText + "\n";
+    }
+    
+    // 주요 아이템 정보 추가
+    const itemsText = formatItemsText();
+    if (itemsText) {
+        text += `\n--- ITEMS ---\n`;
+        text += itemsText + "\n";
     }
     
     if (skippedFromBudget > 0) {

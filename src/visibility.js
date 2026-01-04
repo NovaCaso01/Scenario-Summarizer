@@ -58,7 +58,7 @@ export function applyMessageVisibility() {
     
     // Auto-Hide 비활성화면 스킵
     if (!settings.autoHideEnabled) {
-        log('Auto-hide disabled, skipping visibility changes');
+        log('자동 숨김 비활성화, 가시성 변경 스킵');
         return;
     }
     
@@ -112,7 +112,7 @@ export function applyMessageVisibility() {
     }
     
     if (hiddenCount > 0 || visibleCount > 0) {
-        log(`Visibility updated: hidden=${hiddenCount}, restored=${visibleCount}`);
+        log(`가시성 업데이트: 숨김=${hiddenCount}, 복원=${visibleCount}`);
     }
 }
 
@@ -138,7 +138,7 @@ export function restoreAllVisibility() {
         }
     }
     
-    log('All summarized-hidden messages restored');
+    log('요약으로 숨겨진 메시지 모두 복원됨');
 }
 
 /**

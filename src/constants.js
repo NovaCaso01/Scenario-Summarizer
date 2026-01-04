@@ -47,7 +47,7 @@ function detectExtensionPath() {
 
 export const extensionFolderPath = detectExtensionPath();
 export const METADATA_KEY = "scenario_summarizer";
-export const DATA_VERSION = 2; // 데이터 구조 버전 (마이그레이션용)
+export const DATA_VERSION = 4; // 데이터 구조 버전 (마이그레이션용) - v4: events, items 추가
 
 // API 소스 타입
 export const API_SOURCE = {
@@ -77,7 +77,11 @@ export const defaultSettings = {
     autoHideEnabled: true,         // 요약된 메세지 자동 숨김
     
     // 등장인물 추적 설정
-    characterTrackingEnabled: true, // 요약 시 등장인물 자동 추출/업데이트
+    characterTrackingEnabled: false, // 요약 시 등장인물 자동 추출/업데이트 (기본 OFF)
+    
+    // 이벤트/아이템 추적 설정
+    eventTrackingEnabled: false,   // 요약 시 주요 이벤트 자동 추출 (기본 OFF)
+    itemTrackingEnabled: false,    // 요약 시 주요 아이템 자동 추출 (기본 OFF)
     
     // 월드인포 포함 여부
     includeWorldInfo: false,       // 요약 시 World Info 포함 여부
@@ -128,7 +132,7 @@ export const defaultSettings = {
             enabled: false,
             label: "Date",
             icon: "📅",
-            prompt: "Infer the date from context (mentions of days, events, seasons, holidays, etc.). Write as 'Month/Day(DayOfWeek)' format (e.g., 12/25(Wed), 1/1(Mon)). If cannot be determined, write 'Unknown' or estimate based on context clues. If same as previous summary, maintain it."
+            prompt: "Infer the date from context (mentions of days, events, seasons, holidays, etc.). Write as 'Month/Day(DayOfWeek)' format (e.g., 25/12/25(Wed), 25/1/1(Mon)). If cannot be determined, estimate based on context clues. If same as previous summary, maintain it."
         },
         time: {
             enabled: true,
@@ -162,14 +166,20 @@ export const defaultSettings = {
     customPromptTemplate: null,           // 개별 요약 프롬프트
     customBatchPromptTemplate: null,      // 그룹 요약 프롬프트
     customCharacterPromptTemplate: null,  // 등장인물 추출 프롬프트
+    customEventPromptTemplate: null,      // 이벤트 추출 프롬프트
+    customItemPromptTemplate: null,       // 아이템 추출 프롬프트
     
     // 프롬프트 프리셋 (종류별)
     promptPresets: [],                    // 개별 요약 프리셋 [{name, template}, ...]
     batchPromptPresets: [],               // 그룹 요약 프리셋
     characterPromptPresets: [],           // 등장인물 추출 프리셋
+    eventPromptPresets: [],               // 이벤트 추출 프리셋
+    itemPromptPresets: [],                // 아이템 추출 프리셋
     selectedPromptPreset: "",             // 개별 요약 선택된 프리셋
     selectedBatchPromptPreset: "",        // 그룹 요약 선택된 프리셋
     selectedCharacterPromptPreset: "",    // 등장인물 추출 선택된 프리셋
+    selectedEventPromptPreset: "",        // 이벤트 추출 선택된 프리셋
+    selectedItemPromptPreset: "",         // 아이템 추출 선택된 프리셋
     
     // 디버그
     debugMode: false,
@@ -257,12 +267,13 @@ Analyze the provided single message and extract/summarize information according 
 ## ⚠️ CRITICAL: Output Format Rules
 **YOU MUST follow this EXACT format. Any deviation will cause parsing failure.**
 
-1. Start each group with "#StartNum" on its own line
+1. **MANDATORY:** Start EACH message with "#MessageNumber" header on its own line
 2. Start each category line with "* " (asterisk + space)
 3. Use format: "* CategoryLabel: content"
-4. Separate groups with blank line
+4. Separate messages with blank line
 5. Do NOT use markdown bold (**), bullets (-), or other decorations
 6. Do NOT skip any enabled categories
+7. **NEVER skip the message header - system CANNOT parse without it**
 
 CORRECT example:
 #0
@@ -271,7 +282,10 @@ CORRECT example:
 
 #1
 * Scenario: content here
-* Location: content here`;
+* Location: content here
+
+WRONG (will cause failure):
+* Scenario: content here (missing #0 header!)`;
 
 // 묶음 요약 - 사용자 수정 가능 부분 (지침만)
 export const DEFAULT_BATCH_PROMPT_TEMPLATE = `You are a skilled writer and editor who weaves extensive roleplay logs into a cohesive narrative flow.
@@ -292,11 +306,12 @@ Integrate multiple messages (chunks) into a single, naturally flowing narrative 
 ## ⚠️ CRITICAL: Output Format Rules
 **YOU MUST follow this EXACT format. Any deviation will cause parsing failure.**
 
-1. Start each group with "#StartNum-EndNum" on its own line
+1. **MANDATORY:** Start EACH group with "#StartNum-EndNum" header on its own line
 2. Start each category line with "* " (asterisk + space)
 3. Use format: "* CategoryLabel: content"
 4. Separate groups with blank line
 5. Do NOT use markdown bold (**), bullets (-), or other decorations
+6. **NEVER skip the group header - system CANNOT parse without it**
 
 CORRECT example:
 #0-4
@@ -305,7 +320,10 @@ CORRECT example:
 
 #5-9
 * Scenario: content here
-* Location: content here`;
+* Location: content here
+
+WRONG (will cause failure):
+* Scenario: content here (missing #0-4 header!)`;
 
 // 등장인물 추출 - 사용자 수정 가능 부분 (지침만)
 export const DEFAULT_CHARACTER_PROMPT_TEMPLATE = `Generate profiles for **key characters** who impact the story from the following text.
@@ -317,142 +335,273 @@ export const DEFAULT_CHARACTER_PROMPT_TEMPLATE = `Generate profiles for **key ch
 4. **Format:** Strictly follow the specified JSON format for each character. Write 'N/A' for fields with no information.`;
 
 // 캐릭터 추출 JSON 블록 (요약에 포함될 때 사용) - 언어별 버전
+// 마커 형식으로 변경하여 파싱 실패율 대폭 감소
 export const CHARACTER_EXTRACTION_BLOCKS = {
     ko: `
 ## Character Extraction
-**Output [CHARACTERS_JSON] for characters in this message.**
+**Output [CHARACTERS] block for characters in this message.**
 - First appearance: extract full info
 - Already in "Existing Characters": only include if SIGNIFICANT change (relationship change, occupation change, etc.)
-- Do NOT include temporary states (drunk, blushing, current emotions) in traits/description
-- traits: core personality traits only (up to 10)
-- description: physical appearance
-- relationshipWithUser: noun format like "이웃", "연인", "직장동료" (short parenthetical note OK)
-- **IMPORTANT: If character IS {{user}}, set relationshipWithUser to "본인" (self)**
-- **role: Describe the character's narrative role or function in the story (e.g., 주인공, 악역, 조력자, 멘토, 라이벌, 조연, 흑막, etc.)**
+- Do NOT include temporary states (drunk, blushing, current emotions)
+- **IMPORTANT: If character IS {{user}}, set relationship to "본인" (self)**
 
-[CHARACTERS_JSON]
-{
-  "캐릭터이름": {
-    "role": "스토리에서의 역할 (예: 주인공, 악역, 조력자, 멘토, 라이벌 등)",
-    "age": "24",
-    "occupation": "대학생",
-    "description": "189cm, 근육질 체격",
-    "traits": ["외향적", "사교적", "계산적"],
-    "relationshipWithUser": "이웃 (같은 오피스텔)"
-  }
-}
-[/CHARACTERS_JSON]
+### Output Format (one line per character)
+[CHARACTERS]
+캐릭터이름 | 역할 | 나이 | 직업 | 외모 | 성격특성(쉼표구분) | {{user}}와의관계 | 첫등장메시지번호
+[/CHARACTERS]
 
-Output {} if characters already fully captured in Existing Characters with no changes.`,
+### Example
+[CHARACTERS]
+엘리스 | 주인공의 동료 | 24 | 마법사 | 금발, 파란 눈, 165cm | 외향적, 호기심 많음, 다정함 | 소꿉친구 | 42
+고블린왕 | 악역 | 불명 | 군주 | 거대한 체구, 녹색 피부 | 잔인함, 교활함 | 적 | 58
+[/CHARACTERS]
+
+- Use | as delimiter
+- Write "N/A" for unknown fields
+- If no new characters or changes, output empty block: [CHARACTERS][/CHARACTERS]`,
 
     en: `
 ## Character Extraction
-**Output [CHARACTERS_JSON] for characters in this message.**
+**Output [CHARACTERS] block for characters in this message.**
 - First appearance: extract full info
 - Already in "Existing Characters": only include if SIGNIFICANT change (relationship change, occupation change, etc.)
-- Do NOT include temporary states (drunk, blushing, current emotions) in traits/description
-- traits: core personality traits only (up to 10)
-- description: physical appearance
-- relationshipWithUser: noun format like "neighbor", "lover", "coworker" (short parenthetical note OK)
-- **IMPORTANT: If character IS {{user}}, set relationshipWithUser to "self"**
-- **role: Describe the character's narrative role or function in the story (e.g., protagonist, antagonist, mentor, ally, rival, supporting, mastermind, etc.)**
+- Do NOT include temporary states (drunk, blushing, current emotions)
+- **IMPORTANT: If character IS {{user}}, set relationship to "self"**
 
-[CHARACTERS_JSON]
-{
-  "CharacterName": {
-    "role": "narrative role in story (e.g., protagonist, antagonist, mentor, ally, rival, etc.)",
-    "age": "24",
-    "occupation": "college student",
-    "description": "189cm, muscular build",
-    "traits": ["outgoing", "sociable", "calculating"],
-    "relationshipWithUser": "neighbor (same officetel)"
-  }
-}
-[/CHARACTERS_JSON]
+### Output Format (one line per character)
+[CHARACTERS]
+CharacterName | Role | Age | Occupation | Appearance | Traits(comma-separated) | RelationshipWithUser | FirstAppearanceMessageNumber
+[/CHARACTERS]
 
-Output {} if characters already fully captured in Existing Characters with no changes.`,
+### Example
+[CHARACTERS]
+Alice | protagonist's ally | 24 | mage | blonde, blue eyes, 165cm | outgoing, curious, kind | childhood friend | 42
+Goblin King | antagonist | unknown | monarch | massive build, green skin | cruel, cunning | enemy | 58
+[/CHARACTERS]
+
+- Use | as delimiter
+- Write "N/A" for unknown fields
+- If no new characters or changes, output empty block: [CHARACTERS][/CHARACTERS]`,
 
     ja: `
 ## Character Extraction
-**Output [CHARACTERS_JSON] for characters in this message.**
+**Output [CHARACTERS] block for characters in this message.**
 - First appearance: extract full info
 - Already in "Existing Characters": only include if SIGNIFICANT change (relationship change, occupation change, etc.)
-- Do NOT include temporary states (drunk, blushing, current emotions) in traits/description
-- traits: core personality traits only (up to 10)
-- description: physical appearance
-- relationshipWithUser: noun format like "隣人", "恋人", "同僚" (short parenthetical note OK)
-- **IMPORTANT: If character IS {{user}}, set relationshipWithUser to "本人" (self)**
-- **role: Describe the character's narrative role or function in the story (e.g., 主人公, 敵役, 助力者, 師匠, ライバル, 脇役, 黒幕, etc.)**
+- Do NOT include temporary states (drunk, blushing, current emotions)
+- **IMPORTANT: If character IS {{user}}, set relationship to "本人" (self)**
 
-[CHARACTERS_JSON]
-{
-  "キャラクター名": {
-    "role": "物語での役割（例：主人公、敵役、助力者、師匠、ライバルなど）",
-    "age": "24",
-    "occupation": "大学生",
-    "description": "189cm、筋肉質な体格",
-    "traits": ["外向的", "社交的", "計算高い"],
-    "relationshipWithUser": "隣人（同じマンション）"
-  }
-}
-[/CHARACTERS_JSON]
+### Output Format (one line per character)
+[CHARACTERS]
+キャラクター名 | 役割 | 年齢 | 職業 | 外見 | 性格特性(カンマ区切り) | {{user}}との関係 | 初登場メッセージ番号
+[/CHARACTERS]
 
-Output {} if characters already fully captured in Existing Characters with no changes.`,
+### Example
+[CHARACTERS]
+エリス | 主人公の仲間 | 24 | 魔法使い | 金髪、青い目、165cm | 外向的、好奇心旺盛、優しい | 幼馴染 | 42
+ゴブリン王 | 敵役 | 不明 | 君主 | 巨大な体格、緑の肌 | 残忍、狡猾 | 敵 | 58
+[/CHARACTERS]
+
+- Use | as delimiter
+- Write "N/A" for unknown fields
+- If no new characters or changes, output empty block: [CHARACTERS][/CHARACTERS]`,
 
     zh: `
 ## Character Extraction
-**Output [CHARACTERS_JSON] for characters in this message.**
+**Output [CHARACTERS] block for characters in this message.**
 - First appearance: extract full info
 - Already in "Existing Characters": only include if SIGNIFICANT change (relationship change, occupation change, etc.)
-- Do NOT include temporary states (drunk, blushing, current emotions) in traits/description
-- traits: core personality traits only (up to 10)
-- description: physical appearance
-- relationshipWithUser: noun format like "邻居", "恋人", "同事" (short parenthetical note OK)
-- **IMPORTANT: If character IS {{user}}, set relationshipWithUser to "本人" (self)**
-- **role: Describe the character's narrative role or function in the story (e.g., 主角, 反派, 帮手, 导师, 对手, 配角, 幕后黑手, etc.)**
+- Do NOT include temporary states (drunk, blushing, current emotions)
+- **IMPORTANT: If character IS {{user}}, set relationship to "本人" (self)**
 
-[CHARACTERS_JSON]
-{
-  "角色名": {
-    "role": "故事中的叙事角色（例：主角、反派、帮手、导师、对手等）",
-    "age": "24",
-    "occupation": "大学生",
-    "description": "189cm，肌肉发达的体格",
-    "traits": ["外向", "善于交际", "精于算计"],
-    "relationshipWithUser": "邻居（同一公寓）"
-  }
-}
-[/CHARACTERS_JSON]
+### Output Format (one line per character)
+[CHARACTERS]
+角色名 | 角色 | 年龄 | 职业 | 外貌 | 性格特征(逗号分隔) | 与{{user}}的关系 | 首次出现消息编号
+[/CHARACTERS]
 
-Output {} if characters already fully captured in Existing Characters with no changes.`
+### Example
+[CHARACTERS]
+爱丽丝 | 主角的伙伴 | 24 | 法师 | 金发、蓝眼、165cm | 外向、好奇、善良 | 青梅竹马 | 42
+哥布林王 | 反派 | 不明 | 君主 | 巨大身材、绿色皮肤 | 残忍、狡猾 | 敌人 | 58
+[/CHARACTERS]
+
+- Use | as delimiter
+- Write "N/A" for unknown fields
+- If no new characters or changes, output empty block: [CHARACTERS][/CHARACTERS]`
 };
 
-// 기본값 (하위 호환성)
-export const CHARACTER_EXTRACTION_BLOCK = CHARACTER_EXTRACTION_BLOCKS.ko;
-
 /**
- * 캐릭터 JSON 블록 제거용 정규식 생성 함수
- * 글로벌 플래그가 있는 정규식은 상태(lastIndex)를 유지하므로 
- * 매번 새로운 정규식 객체를 생성하여 반환합니다.
- * @returns {RegExp} - [CHARACTERS_JSON]...[/CHARACTERS_JSON] 패턴을 매치하는 정규식 (글로벌, 대소문자 무시)
+ * 캐릭터 블록 제거용 정규식 생성 함수
+ * 마커 형식 [CHARACTERS]...[/CHARACTERS] 매칭
+ * @returns {RegExp}
  */
 export function getCharacterJsonCleanupPattern() {
-    return /\[CHARACTERS_JSON\]\s*[\s\S]*?\s*\[\/CHARACTERS_JSON\]/gi;
+    // 새 마커 형식과 구버전 JSON 형식 모두 지원
+    return /\[CHARACTERS(?:_JSON)?\]\s*[\s\S]*?\s*\[\/.{0,5}CHARACTERS(?:_JSON)?\]/gi;
 }
 
-// 등장인물 추출 출력 형식 (파싱용)
-export const CHARACTER_OUTPUT_FORMAT = `
-## Output Format (Required - JSON only)
-{
-  "characters": {
-    "CharacterName": {
-      "role": "Role description",
-      "age": "Age (e.g., 24, early 20s)",
-      "occupation": "Occupation (N/A if unknown)",
-      "description": "Appearance/characteristics",
-      "traits": ["trait1", "trait2"],
-      "relationshipWithUser": "Relationship with {{user}} (N/A if unknown)",
-      "firstMessageNum": First appearance message number
-    }
-  }
-}`;
+// ===== 이벤트/아이템 추출 프롬프트 =====
+
+// 이벤트 추출 - 기본 프롬프트 템플릿 (영어, 유저 수정 가능)
+export const DEFAULT_EVENT_PROMPT_TEMPLATE = `## Key Event Extraction Guidelines (Very Strict)
+
+⚠️ **Extract ONLY truly pivotal moments. Most messages will have NO events to extract.**
+
+### Extraction Criteria (ALL must apply)
+- ✅ Decisive moments that affect the entire story
+- ✅ Turning points that completely change the narrative
+- ✅ Events significant enough to be remembered throughout
+
+### Examples to Extract
+- Confessions/Proposals/Engagements/Marriages
+- Major secret revelations or discoveries
+- Breakups/Separations/Reunions
+- Significant promises or vows
+- Life-or-death crisis situations
+
+### ❌ NEVER Extract
+- Everyday conversations, meals, walks
+- Simple emotional expressions or affection
+- Recurring daily events
+- Minor arguments or misunderstandings
+
+⚠️ When in doubt, don't extract. If no events, don't output the JSON block.`;
+
+// 이벤트 추출 - 출력 형식 블록 (언어별, 시스템 자동 추가)
+// 마커 형식으로 변경하여 파싱 실패율 대폭 감소
+export const EVENT_OUTPUT_FORMAT_BLOCKS = {
+    'ko': `
+### 출력 형식 (이벤트가 있을 경우만, 한 줄에 하나씩)
+[EVENTS]
+이벤트제목 | 설명 | 참여자(쉼표구분) | 중요도(high/medium/low) | 메시지번호
+[/EVENTS]
+
+### Example
+[EVENTS]
+첫 고백 | {{user}}가 엘리스에게 고백했다 | {{user}}, 엘리스 | high | 42
+마을 습격 | 고블린 무리가 마을을 공격함 | 고블린왕, 마을사람들 | high | 58
+[/EVENTS]
+
+- 이벤트가 없으면 이 블록을 출력하지 마세요.`,
+    'en': `
+### Output Format (only if events exist, one per line)
+[EVENTS]
+EventTitle | Description | Participants(comma-separated) | Importance(high/medium/low) | MessageNumber
+[/EVENTS]
+
+### Example
+[EVENTS]
+First Confession | {{user}} confessed to Alice | {{user}}, Alice | high | 42
+Village Attack | Goblin horde attacked the village | Goblin King, villagers | high | 58
+[/EVENTS]
+
+- If no events, don't output this block.`,
+    'ja': `
+### 出力形式（イベントがある場合のみ、1行に1つ）
+[EVENTS]
+イベントタイトル | 説明 | 参加者(カンマ区切り) | 重要度(high/medium/low) | メッセージ番号
+[/EVENTS]
+
+### Example
+[EVENTS]
+初告白 | {{user}}がエリスに告白した | {{user}}, エリス | high | 42
+村襲撃 | ゴブリンの群れが村を攻撃 | ゴブリン王, 村人たち | high | 58
+[/EVENTS]
+
+- イベントがなければこのブロックを出力しないでください。`
+};
+
+// 아이템 추출 - 기본 프롬프트 템플릿 (영어, 유저 수정 가능)
+export const DEFAULT_ITEM_PROMPT_TEMPLATE = `## Key Item Extraction Guidelines
+
+Extract ONLY items that play a **crucial role in story development**.
+
+### Extraction Criteria (ALL must apply)
+- ✅ Items with **direct impact** on story or relationship development
+- ✅ Items likely to be mentioned again or become important later
+- ✅ Items with special meaning between characters
+
+### Examples to Extract
+- Jewelry/accessories **personally gifted or received**
+- Items symbolizing relationships (couple rings, necklaces)
+- Keys, keycards - **tools necessary for plot**
+- Character's **core belongings** (always carried)
+
+### ❌ Do NOT Extract
+- Food, drinks, daily consumables
+- Borrowed/worn clothing 
+- Regular clothes, underwear, uniforms
+- Temporary outfits (unless symbolically significant like a wedding dress)
+- Furniture, appliances, buildings (background)
+- Items mentioned only once
+- Generic everyday items
+
+⚠️ If unsure, don't extract. If no items, don't output the JSON block.`;
+
+// 아이템 추출 - 출력 형식 블록 (언어별, 시스템 자동 추가)
+// 마커 형식으로 변경하여 파싱 실패율 대폭 감소
+export const ITEM_OUTPUT_FORMAT_BLOCKS = {
+    'ko': `
+### 출력 형식 (한 줄에 하나씩)
+[ITEMS]
+아이템명 | 스토리에서의 의미 | 현재 소유자 | 획득 경위 | 상태(보유중/사용함/분실/양도/파손) | 메시지번호
+[/ITEMS]
+
+### Example
+[ITEMS]
+마법검 | 전설의 검, 불속성 공격력+10 | {{user}} | 던전에서 획득 | 보유중 | 42
+커플링 | 엘리스와의 약속의 증표 | {{user}} | 엘리스에게 선물받음 | 보유중 | 58
+[/ITEMS]
+
+- 아이템이 없으면 이 블록을 출력하지 마세요.`,
+    'en': `
+### Output Format (one per line)
+[ITEMS]
+ItemName | MeaningInStory | CurrentOwner | HowObtained | Status(possessed/used/lost/transferred/broken) | MessageNumber
+[/ITEMS]
+
+### Example
+[ITEMS]
+Magic Sword | legendary sword, fire attack+10 | {{user}} | found in dungeon | possessed | 42
+Couple Ring | promise token with Alice | {{user}} | gift from Alice | possessed | 58
+[/ITEMS]
+
+- If no items, don't output this block.`,
+    'ja': `
+### 出力形式（1行に1つ）
+[ITEMS]
+アイテム名 | ストーリーでの意味 | 現在の所有者 | 入手経緯 | 状態(所持中/使用済み/紛失/譲渡/破損) | メッセージ番号
+[/ITEMS]
+
+### Example
+[ITEMS]
+魔法剣 | 伝説の剣、炎属性攻撃力+10 | {{user}} | ダンジョンで入手 | 所持中 | 42
+カップルリング | エリスとの約束の証 | {{user}} | エリスからの贈り物 | 所持中 | 58
+[/ITEMS]
+
+- アイテムがなければこのブロックを出力しないでください。`
+};
+
+// 이벤트/아이템 블록 제거용 정규식 생성 함수
+// 새 마커 형식과 구버전 JSON 형식 모두 지원
+export function getEventJsonCleanupPattern() {
+    return /\[EVENTS(?:_JSON)?\]\s*[\s\S]*?\s*\[\/.{0,5}EVENTS(?:_JSON)?\]/gi;
+}
+
+export function getItemJsonCleanupPattern() {
+    return /\[ITEMS(?:_JSON)?\]\s*[\s\S]*?\s*\[\/.{0,5}ITEMS(?:_JSON)?\]/gi;
+}
+
+// 아이템 상태 옵션
+export const ITEM_STATUS_OPTIONS = {
+    'ko': ['보유중', '사용함', '분실', '양도', '파손'],
+    'en': ['owned', 'used', 'lost', 'transferred', 'broken'],
+    'ja': ['所持中', '使用済み', '紛失', '譲渡', '破損']
+};
+
+// 이벤트 중요도 옵션
+export const EVENT_IMPORTANCE_OPTIONS = {
+    'ko': { high: '높음', medium: '보통', low: '낮음' },
+    'en': { high: 'High', medium: 'Medium', low: 'Low' },
+    'ja': { high: '高', medium: '中', low: '低' }
+};

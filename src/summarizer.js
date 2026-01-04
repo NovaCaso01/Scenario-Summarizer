@@ -8,14 +8,19 @@ import {
     extensionName, 
     DEFAULT_PROMPT_TEMPLATE, 
     DEFAULT_BATCH_PROMPT_TEMPLATE,
+    DEFAULT_EVENT_PROMPT_TEMPLATE,
+    DEFAULT_ITEM_PROMPT_TEMPLATE,
     CHARACTER_EXTRACTION_BLOCKS,
-    CHARACTER_OUTPUT_FORMAT,
     getCharacterJsonCleanupPattern,
+    getEventJsonCleanupPattern,
+    getItemJsonCleanupPattern,
+    EVENT_OUTPUT_FORMAT_BLOCKS,
+    ITEM_OUTPUT_FORMAT_BLOCKS,
     LANG_INSTRUCTIONS,
     LANG_REMINDERS
 } from './constants.js';
 import { log, getSettings, startSummarizing, stopSummarizing, shouldStop, isSummarizing, logError } from './state.js';
-import { getSummaryData, saveSummaryData, setSummaryForMessage, formatCharactersText, mergeExtractedCharacters, getPreviousContext, getRecentSummariesForContext } from './storage.js';
+import { getSummaryData, saveSummaryData, setSummaryForMessage, formatCharactersText, mergeExtractedCharacters, getPreviousContext, getRecentSummariesForContext, addEvent, addItem } from './storage.js';
 import { callSummaryAPI } from './api.js';
 import { applyMessageVisibility } from './visibility.js';
 import { injectSummaryToPrompt } from './injection.js';
@@ -24,7 +29,10 @@ import { injectSummaryToPrompt } from './injection.js';
 const REGEX_PREV_TIME = /\{\{PREV_TIME\}\}/g;
 const REGEX_PREV_LOCATION = /\{\{PREV_LOCATION\}\}/g;
 const REGEX_PREV_RELATIONSHIP = /\{\{PREV_RELATIONSHIP\}\}/g;
-const REGEX_CHARACTERS_JSON = /\[CHARACTERS_JSON\]\s*([\s\S]*?)\s*\[\/CHARACTERS_JSON\]/gi;
+// 새 마커 형식 [CHARACTERS]와 구버전 [CHARACTERS_JSON] 모두 지원
+const REGEX_CHARACTERS_BLOCK = /\[CHARACTERS(?:_JSON)?\]\s*([\s\S]*?)\s*\[\/.{0,5}CHARACTERS(?:_JSON)?\]/gi;
+const REGEX_EVENTS_BLOCK = /\[EVENTS(?:_JSON)?\]\s*([\s\S]*?)\s*\[\/.{0,5}EVENTS(?:_JSON)?\]/gi;
+const REGEX_ITEMS_BLOCK = /\[ITEMS(?:_JSON)?\]\s*([\s\S]*?)\s*\[\/.{0,5}ITEMS(?:_JSON)?\]/gi;
 const REGEX_GROUP_HEADER = /^#\d+-\d+\s*\n?/;
 
 /**
@@ -46,8 +54,9 @@ function isIncompleteSummary(content) {
     const closeParens = (trimmed.match(/[\)\]\}]/g) || []).length;
     if (openParens > closeParens) return true;
     
-    // [CHARACTERS_JSON]이 열리고 닫히지 않음
-    if (trimmed.includes('[CHARACTERS_JSON]') && !trimmed.includes('[/CHARACTERS_JSON]')) return true;
+    // [CHARACTERS] 또는 [CHARACTERS_JSON]이 열리고 닫히지 않음
+    if ((trimmed.includes('[CHARACTERS]') && !trimmed.includes('[/CHARACTERS]')) ||
+        (trimmed.includes('[CHARACTERS_JSON]') && !trimmed.includes('[/CHARACTERS_JSON]'))) return true;
     
     return false;
 }
@@ -235,6 +244,16 @@ export function buildSummaryPrompt(messages, startIndex) {
         ? (CHARACTER_EXTRACTION_BLOCKS[charExtractionLang] || CHARACTER_EXTRACTION_BLOCKS.ko)
         : '';
     
+    // 이벤트 추출 블록 (토글 활성화 시, 커스텀/기본 템플릿 + 언어별 출력 형식)
+    const eventExtraction = settings.eventTrackingEnabled 
+        ? (settings.customEventPromptTemplate || DEFAULT_EVENT_PROMPT_TEMPLATE) + '\n\n' + (EVENT_OUTPUT_FORMAT_BLOCKS[charExtractionLang] || EVENT_OUTPUT_FORMAT_BLOCKS.ko)
+        : '';
+    
+    // 아이템 추출 블록 (토글 활성화 시, 커스텀/기본 템플릿 + 언어별 출력 형식)
+    const itemExtraction = settings.itemTrackingEnabled 
+        ? (settings.customItemPromptTemplate || DEFAULT_ITEM_PROMPT_TEMPLATE) + '\n\n' + (ITEM_OUTPUT_FORMAT_BLOCKS[charExtractionLang] || ITEM_OUTPUT_FORMAT_BLOCKS.ko)
+        : '';
+    
     // 사용자 커스텀 프롬프트 또는 기본 프롬프트 (지침만)
     let userInstructions = settings.customPromptTemplate || DEFAULT_PROMPT_TEMPLATE;
     
@@ -326,7 +345,7 @@ ${completionEmphasis}${langReminder}
 
 #MessageNumber
 ${categoryFormat || '* Scenario: (Integrate key events and dialogue narratively)'}
-${formatExample}${characterExtraction}`;
+${formatExample}${characterExtraction}${eventExtraction}${itemExtraction}`;
     
     return prompt;
 }
@@ -441,6 +460,16 @@ export function buildBatchGroupsPrompt(groups, settings) {
         ? (CHARACTER_EXTRACTION_BLOCKS[charExtractionLang] || CHARACTER_EXTRACTION_BLOCKS.ko)
         : '';
     
+    // 이벤트 추출 블록 (토글 활성화 시, 커스텀/기본 템플릿 + 언어별 출력 형식)
+    const eventExtraction = settings.eventTrackingEnabled 
+        ? (settings.customEventPromptTemplate || DEFAULT_EVENT_PROMPT_TEMPLATE) + '\n\n' + (EVENT_OUTPUT_FORMAT_BLOCKS[charExtractionLang] || EVENT_OUTPUT_FORMAT_BLOCKS.ko)
+        : '';
+    
+    // 아이템 추출 블록 (토글 활성화 시, 커스텀/기본 템플릿 + 언어별 출력 형식)
+    const itemExtraction = settings.itemTrackingEnabled 
+        ? (settings.customItemPromptTemplate || DEFAULT_ITEM_PROMPT_TEMPLATE) + '\n\n' + (ITEM_OUTPUT_FORMAT_BLOCKS[charExtractionLang] || ITEM_OUTPUT_FORMAT_BLOCKS.ko)
+        : '';
+    
     // 사용자 커스텀 프롬프트 또는 기본 프롬프트 (지침만)
     let userInstructions = settings.customBatchPromptTemplate || DEFAULT_BATCH_PROMPT_TEMPLATE;
     
@@ -499,18 +528,22 @@ ${existingChars || '(None)'}
 ${groupsText}
 ${langReminder}
 ## Output Format (Required - for each batch)
+**IMPORTANT: Output summaries FIRST, then extraction blocks at the very end.**
+
 #StartNumber-EndNumber
 ${outputFormatExample}
-${characterExtraction}`;
+
+(repeat for each batch)
+${characterExtraction}${eventExtraction}${itemExtraction}`;
     
     return prompt;
 }
 
 /**
- * AI 응답에서 캐릭터 JSON 추출 및 저장
+ * AI 응답에서 캐릭터 추출 및 저장 (마커 형식 + JSON 형식 둘 다 지원)
  * @param {string} response - API 응답
  * @param {number} messageIndex - 첫 등장으로 기록할 메시지 인덱스
- * @returns {string} - 캐릭터 JSON 부분이 제거된 응답
+ * @returns {string} - 캐릭터 블록 부분이 제거된 응답
  */
 function extractAndSaveCharacters(response, messageIndex) {
     const settings = getSettings();
@@ -519,38 +552,83 @@ function extractAndSaveCharacters(response, messageIndex) {
         return response;
     }
     
-    // [CHARACTERS_JSON] 블록이 있는지 먼저 확인
-    const hasCharBlock = response.includes('[CHARACTERS_JSON]');
+    // [CHARACTERS] 또는 [CHARACTERS_JSON] 블록이 있는지 확인
+    const hasCharBlock = response.includes('[CHARACTERS]') || response.includes('[CHARACTERS_JSON]');
     log(`Character extraction: hasCharBlock=${hasCharBlock}, responseLength=${response.length}`);
     
     if (!hasCharBlock) {
-        log(`No [CHARACTERS_JSON] block found in response`);
+        log(`No character block found in response`);
         return response;
     }
     
-    // 사전 컴파일된 정규식 사용 (글로벌 플래그)
-    REGEX_CHARACTERS_JSON.lastIndex = 0; // 리셋
+    // 정규식 리셋
+    REGEX_CHARACTERS_BLOCK.lastIndex = 0;
     let match;
     let extractedCount = 0;
     
-    // 모든 캐릭터 JSON 블록에서 캐릭터 추출
-    while ((match = REGEX_CHARACTERS_JSON.exec(response)) !== null) {
+    while ((match = REGEX_CHARACTERS_BLOCK.exec(response)) !== null) {
         if (match[1]) {
-            try {
-                const jsonStr = match[1].trim();
-                log(`Found character JSON block: ${jsonStr.substring(0, 100)}...`);
-                if (jsonStr && jsonStr !== '{}') {
-                    const characters = JSON.parse(jsonStr);
+            const content = match[1].trim();
+            log(`Found character block: ${content.substring(0, 100)}...`);
+            
+            if (!content || content === '{}') {
+                log(`Empty character block`);
+                continue;
+            }
+            
+            // JSON 형식인지 마커 형식인지 판단
+            if (content.startsWith('{')) {
+                // JSON 형식 (구버전 호환)
+                try {
+                    const characters = JSON.parse(content);
                     if (Object.keys(characters).length > 0) {
-                        log(`Parsed ${Object.keys(characters).length} characters: ${Object.keys(characters).join(', ')}`);
+                        log(`Parsed ${Object.keys(characters).length} characters (JSON): ${Object.keys(characters).join(', ')}`);
                         mergeExtractedCharacters(characters, messageIndex);
                         extractedCount += Object.keys(characters).length;
                     }
-                } else {
-                    log(`Empty character JSON block`);
+                } catch (e) {
+                    log(`Failed to parse character JSON: ${e.message}`);
                 }
-            } catch (e) {
-                log(`Failed to parse character JSON: ${e.message}, content: ${match[1].substring(0, 200)}`);
+            } else {
+                // 마커 형식: 이름 | 역할 | 나이 | 직업 | 외모 | 성격 | 관계 | 첫등장
+                const lines = content.split('\n').filter(line => line.trim() && line.includes('|'));
+                const characters = {};
+                
+                for (const line of lines) {
+                    const parts = line.split('|').map(p => p.trim());
+                    if (parts.length >= 2 && parts[0]) {
+                        const name = parts[0];
+                        const role = parts[1] || '';
+                        const age = parts[2] || '';
+                        const occupation = parts[3] || '';
+                        const description = parts[4] || '';
+                        const traitsStr = parts[5] || '';
+                        const relationship = parts[6] || '';
+                        const firstAppearanceStr = parts[7] || '';
+                        
+                        // traits 파싱 (쉼표 구분)
+                        const traits = traitsStr ? traitsStr.split(',').map(t => t.trim()).filter(t => t && t !== 'N/A') : [];
+                        
+                        // firstAppearance 파싱
+                        const firstAppearance = parseInt(firstAppearanceStr) || messageIndex;
+                        
+                        characters[name] = {
+                            role: role !== 'N/A' ? role : '',
+                            age: age !== 'N/A' ? age : '',
+                            occupation: occupation !== 'N/A' ? occupation : '',
+                            description: description !== 'N/A' ? description : '',
+                            traits: traits,
+                            relationshipWithUser: relationship !== 'N/A' ? relationship : '',
+                            firstAppearance: firstAppearance
+                        };
+                    }
+                }
+                
+                if (Object.keys(characters).length > 0) {
+                    log(`Parsed ${Object.keys(characters).length} characters (marker): ${Object.keys(characters).join(', ')}`);
+                    mergeExtractedCharacters(characters, messageIndex);
+                    extractedCount += Object.keys(characters).length;
+                }
             }
         }
     }
@@ -561,10 +639,219 @@ function extractAndSaveCharacters(response, messageIndex) {
         log(`No characters extracted from response`);
     }
     
-    // 모든 캐릭터 JSON 부분 제거하여 반환 (글로벌 플래그로 모든 매치 제거)
+    // 캐릭터 블록 제거하여 반환
     const cleanedResponse = response.replace(getCharacterJsonCleanupPattern(), '').trim();
     
     return cleanedResponse;
+}
+
+/**
+ * 이벤트 추출 및 저장 (마커 형식 + JSON 형식 둘 다 지원)
+ * @param {string} response - API 응답
+ * @param {number} messageIndex - 메시지 인덱스
+ * @returns {string} - 이벤트 블록 부분을 제거한 응답
+ */
+function extractAndSaveEvents(response, messageIndex) {
+    const settings = getSettings();
+    
+    // 이벤트 추적이 비활성화된 경우 정리만 하고 반환
+    if (!settings.eventTrackingEnabled) {
+        return response.replace(getEventJsonCleanupPattern(), '').trim();
+    }
+    
+    // [EVENTS] 또는 [EVENTS_JSON] 블록이 있는지 확인
+    if (!response.includes('[EVENTS]') && !response.includes('[EVENTS_JSON]')) {
+        return response;
+    }
+    
+    REGEX_EVENTS_BLOCK.lastIndex = 0;
+    let match;
+    let extractedCount = 0;
+    
+    while ((match = REGEX_EVENTS_BLOCK.exec(response)) !== null) {
+        if (match[1]) {
+            const content = match[1].trim();
+            if (!content || content === '{}') continue;
+            
+            // JSON 형식인지 마커 형식인지 판단
+            if (content.startsWith('{')) {
+                // JSON 형식 (구버전 호환)
+                try {
+                    const data = JSON.parse(content);
+                    if (data.events && Array.isArray(data.events)) {
+                        for (const event of data.events) {
+                            if (event.title) {
+                                const eventMessageIndex = (event.messageIndex !== null && event.messageIndex !== undefined) 
+                                    ? event.messageIndex 
+                                    : messageIndex;
+                                addEvent({
+                                    title: event.title,
+                                    description: event.description || '',
+                                    participants: event.participants || [],
+                                    importance: event.importance || 'high',
+                                    date: new Date().toLocaleDateString('ko-KR'),
+                                    messageIndex: eventMessageIndex
+                                });
+                                extractedCount++;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    log(`Failed to parse events JSON: ${e.message}`);
+                }
+            } else {
+                // 마커 형식: 제목 | 설명 | 참여자 | 중요도 | 메시지번호
+                const lines = content.split('\n').filter(line => line.trim() && line.includes('|'));
+                
+                for (const line of lines) {
+                    const parts = line.split('|').map(p => p.trim());
+                    if (parts.length >= 2 && parts[0]) {
+                        const title = parts[0];
+                        const description = parts[1] || '';
+                        const participantsStr = parts[2] || '';
+                        const importance = parts[3] || 'high';
+                        const msgIndexStr = parts[4] || '';
+                        
+                        // participants 파싱 (쉼표 구분)
+                        const participants = participantsStr ? participantsStr.split(',').map(p => p.trim()).filter(p => p) : [];
+                        
+                        // messageIndex 파싱
+                        const eventMessageIndex = parseInt(msgIndexStr) || messageIndex;
+                        
+                        addEvent({
+                            title: title,
+                            description: description,
+                            participants: participants,
+                            importance: importance.toLowerCase() === 'high' || importance.toLowerCase() === 'medium' || importance.toLowerCase() === 'low' ? importance.toLowerCase() : 'high',
+                            date: new Date().toLocaleDateString('ko-KR'),
+                            messageIndex: eventMessageIndex
+                        });
+                        extractedCount++;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (extractedCount > 0) {
+        log(`Extracted ${extractedCount} events from response`);
+    }
+    
+    return response.replace(getEventJsonCleanupPattern(), '').trim();
+}
+
+/**
+ * 아이템 추출 및 저장 (마커 형식 + JSON 형식 둘 다 지원)
+ * @param {string} response - API 응답
+ * @param {number} messageIndex - 메시지 인덱스
+ * @returns {string} - 아이템 블록 부분을 제거한 응답
+ */
+function extractAndSaveItems(response, messageIndex) {
+    const settings = getSettings();
+    
+    // 아이템 추적이 비활성화된 경우 정리만 하고 반환
+    if (!settings.itemTrackingEnabled) {
+        return response.replace(getItemJsonCleanupPattern(), '').trim();
+    }
+    
+    // [ITEMS] 또는 [ITEMS_JSON] 블록이 있는지 확인
+    if (!response.includes('[ITEMS]') && !response.includes('[ITEMS_JSON]')) {
+        return response;
+    }
+    
+    REGEX_ITEMS_BLOCK.lastIndex = 0;
+    let match;
+    let extractedCount = 0;
+    
+    while ((match = REGEX_ITEMS_BLOCK.exec(response)) !== null) {
+        if (match[1]) {
+            const content = match[1].trim();
+            if (!content || content === '{}') continue;
+            
+            // JSON 형식인지 마커 형식인지 판단
+            if (content.startsWith('{')) {
+                // JSON 형식 (구버전 호환)
+                try {
+                    const data = JSON.parse(content);
+                    if (data.items && Array.isArray(data.items)) {
+                        for (const item of data.items) {
+                            if (item.name) {
+                                let status = normalizeItemStatus(item.status);
+                                const itemMessageIndex = (item.messageIndex !== null && item.messageIndex !== undefined) 
+                                    ? item.messageIndex 
+                                    : messageIndex;
+                                
+                                addItem({
+                                    name: item.name,
+                                    description: item.description || '',
+                                    owner: item.owner || '',
+                                    origin: item.origin || '',
+                                    status: status,
+                                    messageIndex: itemMessageIndex
+                                });
+                                extractedCount++;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    log(`Failed to parse items JSON: ${e.message}`);
+                }
+            } else {
+                // 마커 형식: 이름 | 설명 | 소유자 | 획득경위 | 상태 | 메시지번호
+                const lines = content.split('\n').filter(line => line.trim() && line.includes('|'));
+                
+                for (const line of lines) {
+                    const parts = line.split('|').map(p => p.trim());
+                    if (parts.length >= 2 && parts[0]) {
+                        const name = parts[0];
+                        const description = parts[1] || '';
+                        const owner = parts[2] || '';
+                        const origin = parts[3] || '';
+                        const statusStr = parts[4] || 'possessed';
+                        const msgIndexStr = parts[5] || '';
+                        
+                        // 상태값 정규화
+                        const status = normalizeItemStatus(statusStr);
+                        
+                        // messageIndex 파싱
+                        const itemMessageIndex = parseInt(msgIndexStr) || messageIndex;
+                        
+                        addItem({
+                            name: name,
+                            description: description,
+                            owner: owner,
+                            origin: origin,
+                            status: status,
+                            messageIndex: itemMessageIndex
+                        });
+                        extractedCount++;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (extractedCount > 0) {
+        log(`Extracted ${extractedCount} items from response`);
+    }
+    
+    return response.replace(getItemJsonCleanupPattern(), '').trim();
+}
+
+/**
+ * 아이템 상태값 정규화
+ * @param {string} status - 원본 상태값
+ * @returns {string} - 정규화된 상태값
+ */
+function normalizeItemStatus(status) {
+    if (!status) return 'possessed';
+    const s = status.toLowerCase().trim();
+    if (s === '보유중' || s === '所持中' || s === 'owned' || s === 'possessed') return 'possessed';
+    if (s === '사용함' || s === '使用済み' || s === 'used') return 'used';
+    if (s === '분실' || s === '紛失' || s === 'lost') return 'lost';
+    if (s === '양도' || s === '譲渡' || s === 'transferred') return 'transferred';
+    if (s === '파손' || s === '破損' || s === 'broken') return 'broken';
+    return 'possessed';
 }
 
 /**
@@ -574,13 +861,26 @@ function extractAndSaveCharacters(response, messageIndex) {
  * @returns {Object} - { 인덱스: 요약내용 }
  */
 export function parseBatchGroupsResponse(response, groups) {
-    // 먼저 캐릭터 추출 및 저장
+    // 그룹 전체의 인덱스 범위 계산
     const firstIndex = groups.length > 0 ? groups[0].indices[0] : 0;
-    const cleanResponse = extractAndSaveCharacters(response, firstIndex);
+    const lastIndex = groups.length > 0 ? groups[groups.length - 1].indices[groups[groups.length - 1].indices.length - 1] : 0;
+    
+    // 먼저 캐릭터 추출 및 저장
+    let cleanResponse = extractAndSaveCharacters(response, firstIndex);
+    // 이벤트/아이템 추출 및 저장 (마지막 인덱스 사용 - 더 최신 시점)
+    cleanResponse = extractAndSaveEvents(cleanResponse, lastIndex);
+    cleanResponse = extractAndSaveItems(cleanResponse, lastIndex);
     const result = {};
     const totalGroups = groups.length;
     
     log(`Parsing batch groups response (${cleanResponse.length} chars), ${totalGroups} groups expected`);
+    
+    // 짧은 응답 감지: 그룹당 최소 100자 정도는 필요
+    const minExpectedLength = totalGroups * 80;
+    if (cleanResponse.length < minExpectedLength && totalGroups > 1) {
+        log(`WARNING: Response too short (${cleanResponse.length} < ${minExpectedLength}). AI may have truncated or skipped summaries.`);
+        log(`DEBUG: Short response content: ${cleanResponse.substring(0, 500)}`);
+    }
     
     // 전체 응답이 불완전한지 먼저 체크
     if (isIncompleteSummary(cleanResponse)) {
@@ -684,7 +984,10 @@ export function parseBatchGroupsResponse(response, groups) {
  */
 export function parseApiResponse(response, startIndex, endIndex) {
     // 먼저 캐릭터 추출 및 저장
-    const cleanResponse = extractAndSaveCharacters(response, startIndex);
+    let cleanResponse = extractAndSaveCharacters(response, startIndex);
+    // 이벤트/아이템 추출 및 저장 (endIndex 사용 - 더 최신 시점)
+    cleanResponse = extractAndSaveEvents(cleanResponse, endIndex);
+    cleanResponse = extractAndSaveItems(cleanResponse, endIndex);
     const result = {};
     
     log(`Parsing response (${cleanResponse.length} chars), startIndex=${startIndex}, endIndex=${endIndex}`);
@@ -944,10 +1247,10 @@ export async function runSummary(customStart = null, customEnd = null, onProgres
 export async function runAutoSummary() {
     const settings = getSettings();
     
-    log(`Auto-summary check: enabled=${settings.enabled}, automaticMode=${settings.automaticMode}`);
+    log(`자동 요약 체크: enabled=${settings.enabled}, automaticMode=${settings.automaticMode}`);
     
     if (!settings.enabled || !settings.automaticMode) {
-        log('Auto-summary skipped: disabled or manual mode');
+        log('자동 요약 스킵: 비활성화 또는 수동 모드');
         return false;
     }
     
@@ -955,7 +1258,7 @@ export async function runAutoSummary() {
     const data = getSummaryData();
     
     if (!context.chat || !data) {
-        log(`Auto-summary skipped: no chat or data (chat=${!!context.chat}, data=${!!data})`);
+        log(`자동 요약 스킵: 채팅 또는 데이터 없음 (chat=${!!context.chat}, data=${!!data})`);
         return false;
     }
     
@@ -1162,5 +1465,82 @@ export async function resummarizeMessage(messageIndex) {
     } catch (error) {
         logError('resummarizeMessage', error, { messageIndex });
         return { success: false, error: error.message };
+    }
+}
+
+/**
+ * 여러 그룹을 한 번의 API 호출로 재요약
+ * @param {Array<{startIdx: number, endIdx: number}>} groupRanges - 재요약할 그룹 범위 배열
+ * @returns {Promise<{success: boolean, successCount: number, failCount: number, error?: string}>}
+ */
+export async function resummarizeMultipleGroups(groupRanges) {
+    const context = getContext();
+    const settings = getSettings();
+    
+    if (!context.chat || groupRanges.length === 0) {
+        return { success: false, successCount: 0, failCount: 0, error: "잘못된 입력" };
+    }
+    
+    try {
+        // 그룹 데이터 구성
+        const groups = [];
+        for (const range of groupRanges) {
+            const indices = [];
+            const messages = [];
+            for (let i = range.startIdx; i <= range.endIdx; i++) {
+                if (i < context.chat.length) {
+                    indices.push(i);
+                    messages.push(context.chat[i]);
+                }
+            }
+            if (indices.length > 0) {
+                groups.push({ indices, messages });
+            }
+        }
+        
+        if (groups.length === 0) {
+            return { success: false, successCount: 0, failCount: 0, error: "유효한 그룹 없음" };
+        }
+        
+        // 배치 그룹 프롬프트 생성 및 API 호출
+        const prompt = buildBatchGroupsPrompt(groups, settings);
+        const response = await callSummaryAPI(prompt);
+        
+        if (!response) {
+            return { success: false, successCount: 0, failCount: groups.length, error: "응답 없음" };
+        }
+        
+        // 응답 파싱
+        const parsed = parseBatchGroupsResponse(response, groups);
+        
+        // 결과 저장
+        let successCount = 0;
+        let failCount = 0;
+        
+        for (const group of groups) {
+            const startIdx = group.indices[0];
+            const endIdx = group.indices[group.indices.length - 1];
+            const summary = parsed[startIdx];
+            
+            if (summary && !summary.includes('파싱 실패') && !summary.includes('❌')) {
+                // 성공: 모든 인덱스에 저장
+                for (const idx of group.indices) {
+                    setSummaryForMessage(idx, parsed[idx]);
+                }
+                successCount++;
+            } else {
+                // 실패
+                failCount++;
+            }
+        }
+        
+        await saveSummaryData();
+        injectSummaryToPrompt();
+        
+        return { success: true, successCount, failCount };
+        
+    } catch (error) {
+        logError('resummarizeMultipleGroups', error, { groupCount: groupRanges.length });
+        return { success: false, successCount: 0, failCount: groupRanges.length, error: error.message };
     }
 }
