@@ -23,18 +23,21 @@ function formatEventsText() {
     const settings = getSettings();
     const lang = settings.summaryLanguage || 'ko';
     
-    // 중요도 라벨 (영어 = 토큰 절약)
+    // 중요도 라벨 (언어별)
     const importanceLabels = {
-        'high': lang === 'ko' ? '높음' : 'HIGH',
-        'medium': lang === 'ko' ? '중간' : 'MED',
-        'low': lang === 'ko' ? '낮음' : 'LOW'
+        'ko': { 'high': '높음', 'medium': '중간', 'low': '낮음' },
+        'en': { 'high': 'HIGH', 'medium': 'MED', 'low': 'LOW' },
+        'ja': { 'high': '高', 'medium': '中', 'low': '低' },
+        'zh': { 'high': '高', 'medium': '中', 'low': '低' },
+        'hybrid': { 'high': 'HIGH', 'medium': 'MED', 'low': 'LOW' }
     };
+    const langLabels = importanceLabels[lang] || importanceLabels['en'];
     
     let text = '';
     for (const event of events) {
         // 중요도 태그
         const importance = event.importance || 'medium';
-        const impLabel = importanceLabels[importance] || importanceLabels['medium'];
+        const impLabel = langLabels[importance] || langLabels['medium'];
         
         text += `- [${impLabel}] ${event.title}`;
         if (event.messageIndex !== null && event.messageIndex !== undefined) {
@@ -59,35 +62,29 @@ function formatItemsText() {
     const settings = getSettings();
     const lang = settings.summaryLanguage || 'ko';
     
-    // 상태 라벨 (언어별)
-    const statusLabels = lang === 'ko' ? {
-        'possessed': '보유',
-        'used': '사용됨',
-        'lost': '분실',
-        'transferred': '양도'
-    } : {
-        'possessed': 'HELD',
-        'used': 'USED',
-        'lost': 'LOST',
-        'transferred': 'GIVEN'
+    // 중요도 라벨 (언어별)
+    const importanceLabelsMap = {
+        'ko': { 'high': '높음', 'medium': '중간', 'low': '낮음' },
+        'en': { 'high': 'HIGH', 'medium': 'MED', 'low': 'LOW' },
+        'ja': { 'high': '高', 'medium': '中', 'low': '低' },
+        'zh': { 'high': '高', 'medium': '中', 'low': '低' },
+        'hybrid': { 'high': 'HIGH', 'medium': 'MED', 'low': 'LOW' }
     };
-    
-    // 중요도 라벨 (영어 = 토큰 절약)
-    const importanceLabels = {
-        'high': lang === 'ko' ? '높음' : 'HIGH',
-        'medium': lang === 'ko' ? '중간' : 'MED',
-        'low': lang === 'ko' ? '낮음' : 'LOW'
-    };
+    const importanceLabels = importanceLabelsMap[lang] || importanceLabelsMap['en'];
     
     let text = '';
     for (const item of items) {
-        const statusLabel = statusLabels[item.status] || item.status;
         const importance = item.importance || 'medium';
         const impLabel = importanceLabels[importance] || importanceLabels['medium'];
         
-        text += `- [${impLabel}] ${item.name} [${statusLabel}]`;
+        // 상태는 AI가 작성한 그대로 출력
+        text += `- [${impLabel}] ${item.name}`;
+        if (item.status) {
+            text += ` [${item.status}]`;
+        }
         if (item.owner) {
-            text += lang === 'ko' ? ` 소유:${item.owner}` : ` by:${item.owner}`;
+            const ownerLabel = (lang === 'ko') ? '소유:' : (lang === 'zh') ? '所有:' : (lang === 'ja') ? '所有:' : 'by:';
+            text += ` ${ownerLabel}${item.owner}`;
         }
         text += '\n';
         if (item.description) {

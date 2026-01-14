@@ -776,7 +776,6 @@ function extractAndSaveItems(response, messageIndex) {
                     if (data.items && Array.isArray(data.items)) {
                         for (const item of data.items) {
                             if (item.name) {
-                                let status = normalizeItemStatus(item.status);
                                 const itemMessageIndex = (item.messageIndex !== null && item.messageIndex !== undefined) 
                                     ? item.messageIndex 
                                     : messageIndex;
@@ -786,7 +785,7 @@ function extractAndSaveItems(response, messageIndex) {
                                     description: item.description || '',
                                     owner: item.owner || '',
                                     origin: item.origin || '',
-                                    status: status,
+                                    status: item.status || '',
                                     messageIndex: itemMessageIndex
                                 });
                                 extractedCount++;
@@ -807,11 +806,8 @@ function extractAndSaveItems(response, messageIndex) {
                         const description = parts[1] || '';
                         const owner = parts[2] || '';
                         const origin = parts[3] || '';
-                        const statusStr = parts[4] || 'possessed';
+                        const status = parts[4] || '';
                         const msgIndexStr = parts[5] || '';
-                        
-                        // 상태값 정규화
-                        const status = normalizeItemStatus(statusStr);
                         
                         // messageIndex 파싱
                         const itemMessageIndex = parseInt(msgIndexStr) || messageIndex;
@@ -836,22 +832,6 @@ function extractAndSaveItems(response, messageIndex) {
     }
     
     return response.replace(getItemJsonCleanupPattern(), '').trim();
-}
-
-/**
- * 아이템 상태값 정규화
- * @param {string} status - 원본 상태값
- * @returns {string} - 정규화된 상태값
- */
-function normalizeItemStatus(status) {
-    if (!status) return 'possessed';
-    const s = status.toLowerCase().trim();
-    if (s === '보유중' || s === '所持中' || s === 'owned' || s === 'possessed') return 'possessed';
-    if (s === '사용함' || s === '使用済み' || s === 'used') return 'used';
-    if (s === '분실' || s === '紛失' || s === 'lost') return 'lost';
-    if (s === '양도' || s === '譲渡' || s === 'transferred') return 'transferred';
-    if (s === '파손' || s === '破損' || s === 'broken') return 'broken';
-    return 'possessed';
 }
 
 /**

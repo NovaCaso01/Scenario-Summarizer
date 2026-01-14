@@ -102,7 +102,7 @@ export const defaultSettings = {
             enabled: true,
             label: "Scenario",
             icon: "📖",
-            prompt: "Summarize the cause-and-effect flow of events narratively. Focus on 'who did what and why' rather than simple enumeration. Include important dialogue using double quotes (\"\") with direct quotation from the original text to maintain character voice."
+            prompt: "Summarize the cause-and-effect flow of events narratively. Focus on 'who did what and why' rather than simple enumeration. Include important dialogue using double quotes (\"\") with direct quotation from the original text to maintain character voice. (Do not change or shorten the dialogue.) Don't overlook even minor actions or lines of dialogue that may signal changes in character relationships or become pivotal moments shaping the future."
         },
         emotion: {
             enabled: false,
@@ -132,7 +132,7 @@ export const defaultSettings = {
             enabled: false,
             label: "Date",
             icon: "📅",
-            prompt: "Infer the date from context (mentions of days, events, seasons, holidays, etc.). Write as 'Month/Day(DayOfWeek)' format (e.g., 25/12/25(Wed), 25/1/1(Mon)). If cannot be determined, estimate based on context clues. If same as previous summary, maintain it."
+            prompt: "Infer the date from context (mentions of days, events, seasons, holidays, etc.). Write as 'Year/Month/Day(DayOfWeek)' format (e.g., 25/12/25(Wed), 25/1/1(Mon)). If cannot be determined, estimate based on context clues. If same as previous summary, maintain it. If there was a date change, use the arrow (→)."
         },
         time: {
             enabled: true,
@@ -214,6 +214,12 @@ DO NOT keep any non-English text. Translate ALL dialogue.
 - 台詞引用：日本語に翻訳
 - カテゴリラベル：日本語
 ##########################################`,
+    'zh': `###### 🚨 重要语言要求 🚨 ######
+**【绝对必须】所有输出必须用中文写。**
+- 摘要正文：中文
+- 对话引用：翻译成中文
+- 分类标签：中文（场景、地点、时间、关系等）
+##########################################`,
     'hybrid': `###### 🚨 CRITICAL LANGUAGE REQUIREMENT - HYBRID MODE 🚨 ######
 **[MANDATORY - READ CAREFULLY]**
 
@@ -240,6 +246,7 @@ export const LANG_REMINDERS = {
     'ko': '\n🚨 **[최종 리마인더] 아래 출력을 반드시 한국어로 작성하세요!** 🚨\n',
     'en': '\n🚨 **[FINAL REMINDER] Write ALL output below in ENGLISH! Translate all dialogue!** 🚨\n',
     'ja': '\n🚨 **【最終リマインダー】以下の出力はすべて日本語で！** 🚨\n',
+    'zh': '\n🚨 **【最终提醒】以下所有输出必须用中文！** 🚨\n',
     'hybrid': '\n🚨 **[FINAL REMINDER - HYBRID MODE]** 🚨\n**Narrative = ENGLISH | Dialogue in quotes = ORIGINAL LANGUAGE (한국어/日本語/etc.)**\nDO NOT translate the dialogue! Keep "quoted text" exactly as in source!\n'
 };
 
@@ -326,13 +333,19 @@ WRONG (will cause failure):
 * Scenario: content here (missing #0-4 header!)`;
 
 // 등장인물 추출 - 사용자 수정 가능 부분 (지침만)
-export const DEFAULT_CHARACTER_PROMPT_TEMPLATE = `Generate profiles for **key characters** who impact the story from the following text.
+export const DEFAULT_CHARACTER_PROMPT_TEMPLATE = `## Key Character Extraction Guidelines
+Extract profiles for **key characters** actively involved in the conversation.
 
-## Extraction Guidelines
-1. **Profile Info Priority:** Always use information already specified in the character profile as-is. Do not infer from message content.
-2. **Evidence-Based:** For new characters without profiles, only include what is explicitly stated or strongly implied in the text.
-3. **Exclusions:** Exclude characters with no dialogue or background extras who appear briefly.
-4. **Format:** Strictly follow the specified JSON format for each character. Write 'N/A' for fields with no information.`;
+### Extraction Criteria (✅)
+- ✅ Extract **only confirmed information** (appearance, personality, relationships, backstory)
+- ✅ **Profile Info Priority**: Appearance > Personality > Key Actions > Relationships (e.g., {{char}}'s girlfriend, {{user}}'s friend) > Backstory (keep minimal, focus on what directly affects current story)
+- ✅ **Evidence-Based**: Extract **only explicitly confirmed information** from the conversation
+
+### ❌ Do NOT Extract
+- Generic NPCs (e.g., waiter, clerk) mentioned once without characterization
+- Existing main character {{char}} or {{user}}
+
+⚠️ Never infer, assume, or add details not present. Combine all details in 2-3 sentences per character.`;
 
 // 캐릭터 추출 JSON 블록 (요약에 포함될 때 사용) - 언어별 버전
 // 마커 형식으로 변경하여 파싱 실패율 대폭 감소
@@ -444,8 +457,7 @@ export function getCharacterJsonCleanupPattern() {
 
 // 이벤트 추출 - 기본 프롬프트 템플릿 (영어, 유저 수정 가능)
 export const DEFAULT_EVENT_PROMPT_TEMPLATE = `## Key Event Extraction Guidelines (Very Strict)
-
-⚠️ **Extract ONLY truly pivotal moments. Most messages will have NO events to extract.**
+Extract ONLY truly pivotal moments that fundamentally change character states, relationships, or story direction.
 
 ### Extraction Criteria (ALL must apply)
 - ✅ Decisive moments that affect the entire story
@@ -508,7 +520,20 @@ Village Attack | Goblin horde attacked the village | Goblin King, villagers | hi
 村襲撃 | ゴブリンの群れが村を攻撃 | ゴブリン王, 村人たち | high | 58
 [/EVENTS]
 
-- イベントがなければこのブロックを出力しないでください。`
+- イベントがなければこのブロックを出力しないでください。`,
+    'zh': `
+### 输出格式（仅当有事件时，每行一个）
+[EVENTS]
+事件标题 | 描述 | 参与者(逗号分隔) | 重要性(high/medium/low) | 消息编号
+[/EVENTS]
+
+### 示例
+[EVENTS]
+首次告白 | {{user}}向艾丽丝告白 | {{user}}, 艾丽丝 | high | 42
+村庄袭击 | 哥布林群袋击了村庄 | 哥布林王, 村民们 | high | 58
+[/EVENTS]
+
+- 如果没有事件，请不要输出此块。`
 };
 
 // 아이템 추출 - 기본 프롬프트 템플릿 (영어, 유저 수정 가능)
@@ -544,7 +569,7 @@ export const ITEM_OUTPUT_FORMAT_BLOCKS = {
     'ko': `
 ### 출력 형식 (한 줄에 하나씩)
 [ITEMS]
-아이템명 | 스토리에서의 의미 | 현재 소유자 | 획득 경위 | 상태(보유중/사용함/분실/양도/파손) | 메시지번호
+아이템명 | 스토리에서의 의미 | 현재 소유자 | 획득 경위 | 상태 | 메시지번호
 [/ITEMS]
 
 ### Example
@@ -557,7 +582,7 @@ export const ITEM_OUTPUT_FORMAT_BLOCKS = {
     'en': `
 ### Output Format (one per line)
 [ITEMS]
-ItemName | MeaningInStory | CurrentOwner | HowObtained | Status(possessed/used/lost/transferred/broken) | MessageNumber
+ItemName | MeaningInStory | CurrentOwner | HowObtained | Status | MessageNumber
 [/ITEMS]
 
 ### Example
@@ -570,7 +595,7 @@ Couple Ring | promise token with Alice | {{user}} | gift from Alice | possessed 
     'ja': `
 ### 出力形式（1行に1つ）
 [ITEMS]
-アイテム名 | ストーリーでの意味 | 現在の所有者 | 入手経緯 | 状態(所持中/使用済み/紛失/譲渡/破損) | メッセージ番号
+アイテム名 | ストーリーでの意味 | 現在の所有者 | 入手経緯 | 状態 | メッセージ番号
 [/ITEMS]
 
 ### Example
@@ -579,7 +604,20 @@ Couple Ring | promise token with Alice | {{user}} | gift from Alice | possessed 
 カップルリング | エリスとの約束の証 | {{user}} | エリスからの贈り物 | 所持中 | 58
 [/ITEMS]
 
-- アイテムがなければこのブロックを出力しないでください。`
+- アイテムがなければこのブロックを出力しないでください。`,
+    'zh': `
+### 输出格式（每行一个）
+[ITEMS]
+物品名称 | 在故事中的意义 | 当前所有者 | 获取方式 | 状态 | 消息编号
+[/ITEMS]
+
+### 示例
+[ITEMS]
+魔法剑 | 传说之剑，火属性攻击力+10 | {{user}} | 地牢中获得 | 持有中 | 42
+情侣戒指 | 与艾丽丝的约定信物 | {{user}} | 艾丽丝送的礼物 | 持有中 | 58
+[/ITEMS]
+
+- 如果没有物品，请不要输出此块。`
 };
 
 // 이벤트/아이템 블록 제거용 정규식 생성 함수
@@ -591,17 +629,3 @@ export function getEventJsonCleanupPattern() {
 export function getItemJsonCleanupPattern() {
     return /\[ITEMS(?:_JSON)?\]\s*[\s\S]*?\s*\[\/.{0,5}ITEMS(?:_JSON)?\]/gi;
 }
-
-// 아이템 상태 옵션
-export const ITEM_STATUS_OPTIONS = {
-    'ko': ['보유중', '사용함', '분실', '양도', '파손'],
-    'en': ['owned', 'used', 'lost', 'transferred', 'broken'],
-    'ja': ['所持中', '使用済み', '紛失', '譲渡', '破損']
-};
-
-// 이벤트 중요도 옵션
-export const EVENT_IMPORTANCE_OPTIONS = {
-    'ko': { high: '높음', medium: '보통', low: '낮음' },
-    'en': { high: 'High', medium: 'Medium', low: 'Low' },
-    'ja': { high: '高', medium: '中', low: '低' }
-};

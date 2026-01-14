@@ -430,25 +430,45 @@
     }
     
     .summarizer-preset-actions {
-        flex-direction: column;
+        display: grid !important;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
     }
     
     .summarizer-preset-save-row {
-        flex-direction: column;
+        flex-direction: row;
+        gap: 6px;
+    }
+    
+    .summarizer-preset-save-row .summarizer-preset-input {
+        flex: 1;
+        min-width: 0;
+        font-size: 13px;
+        padding: 10px 10px;
+    }
+    
+    .summarizer-preset-save-row .summarizer-btn {
+        flex-shrink: 0;
+        white-space: nowrap;
+        padding: 10px 14px;
+        font-size: 13px;
     }
     
     .summarizer-prompt-subtabs {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 4px;
+        overflow-x: auto;
+        white-space: nowrap;
     }
     
     .summarizer-prompt-subtab {
-        font-size: 11px;
-        padding: 8px 6px;
+        font-size: 10px;
+        padding: 8px 4px;
         flex-direction: column;
         gap: 2px;
-        white-space: nowrap;
+        white-space: normal;
+        min-width: 70px;
     }
     
     .summarizer-prompt-subtab i {

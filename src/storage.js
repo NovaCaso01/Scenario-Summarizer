@@ -1703,10 +1703,29 @@ export function addItem(itemData) {
     );
     
     if (existingIndex !== -1) {
-        // 기존 아이템이 있으면 상태만 업데이트 (확실한 변경만)
+        // 기존 아이템이 있으면 변경된 필드 업데이트
         const existing = data.items[existingIndex];
+        let updated = false;
+        
+        // 상태 업데이트
         if (itemData.status && itemData.status !== existing.status) {
             existing.status = itemData.status;
+            updated = true;
+        }
+        
+        // 소유자 업데이트
+        if (itemData.owner && itemData.owner !== existing.owner) {
+            existing.owner = itemData.owner;
+            updated = true;
+        }
+        
+        // 설명 업데이트 (새 설명이 더 길거나 기존이 비어있을 때)
+        if (itemData.description && (!existing.description || itemData.description.length > existing.description.length)) {
+            existing.description = itemData.description;
+            updated = true;
+        }
+        
+        if (updated) {
             existing.updatedAt = Date.now();
             // messageIndex 업데이트 (더 최신 위치로)
             if (itemData.messageIndex && (!existing.messageIndex || itemData.messageIndex > existing.messageIndex)) {
