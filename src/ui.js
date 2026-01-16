@@ -3749,7 +3749,7 @@ function editCharacter(name) {
     
     editingCharacterName = name;
     $("#character-form-title").text("등장인물 수정");
-    $("#character-name").val(name).prop("disabled", true);
+    $("#character-name").val(name).prop("disabled", false);
     $("#character-role").val(char.role || "");
     $("#character-age").val(char.age || "");
     $("#character-occupation").val(char.occupation || "");
@@ -3764,9 +3764,9 @@ function editCharacter(name) {
  * 폼에서 등장인물 저장
  */
 async function saveCharacterFromForm() {
-    const name = editingCharacterName || $("#character-name").val().trim();
+    const newName = $("#character-name").val().trim();
     
-    if (!name) {
+    if (!newName) {
         showToast('error', '이름을 입력하세요');
         return;
     }
@@ -3781,7 +3781,12 @@ async function saveCharacterFromForm() {
     const firstAppearanceVal = $("#character-first-appearance").val();
     const firstAppearance = firstAppearanceVal ? parseInt(firstAppearanceVal) : null;
     
-    setCharacter(name, {
+    // 이름이 변경된 경우 기존 캐릭터 삭제
+    if (editingCharacterName && editingCharacterName !== newName) {
+        deleteCharacter(editingCharacterName);
+    }
+    
+    setCharacter(newName, {
         role,
         age,
         occupation,
@@ -3794,7 +3799,7 @@ async function saveCharacterFromForm() {
     await saveSummaryData();
     hideCharacterForm();
     renderCharactersList();
-    showToast('success', `'${name}' 저장됨`);
+    showToast('success', `'${newName}' 저장됨`);
 }
 
 /**
