@@ -2,7 +2,7 @@
  * 시나리오 자동요약 - 요약 생성 핵심 로직
  */
 
-import { getContext, extension_settings } from "../../../../extensions.js";
+import { getContext } from "../../../../extensions.js";
 import { power_user } from "../../../../power-user.js";
 import { 
     extensionName, 
@@ -17,7 +17,12 @@ import {
     EVENT_OUTPUT_FORMAT_BLOCKS,
     ITEM_OUTPUT_FORMAT_BLOCKS,
     LANG_INSTRUCTIONS,
-    LANG_REMINDERS
+    LANG_REMINDERS,
+    makeGroupIncludedMarker,
+    PARSING_FAILED_MARKER,
+    isParsingFailedContent,
+    isGroupIncludedContent,
+    DEFAULT_COMPRESS_PROMPT_TEMPLATE
 } from './constants.js';
 import { log, getSettings, startSummarizing, stopSummarizing, shouldStop, isSummarizing, logError } from './state.js';
 import { getSummaryData, saveSummaryData, setSummaryForMessage, formatCharactersText, mergeExtractedCharacters, getPreviousContext, getRecentSummariesForContext, addEvent, addItem } from './storage.js';
@@ -30,9 +35,10 @@ const REGEX_PREV_TIME = /\{\{PREV_TIME\}\}/g;
 const REGEX_PREV_LOCATION = /\{\{PREV_LOCATION\}\}/g;
 const REGEX_PREV_RELATIONSHIP = /\{\{PREV_RELATIONSHIP\}\}/g;
 // 새 마커 형식 [CHARACTERS]와 구버전 [CHARACTERS_JSON] 모두 지원
-const REGEX_CHARACTERS_BLOCK = /\[CHARACTERS(?:_JSON)?\]\s*([\s\S]*?)\s*\[\/.{0,5}CHARACTERS(?:_JSON)?\]/gi;
-const REGEX_EVENTS_BLOCK = /\[EVENTS(?:_JSON)?\]\s*([\s\S]*?)\s*\[\/.{0,5}EVENTS(?:_JSON)?\]/gi;
-const REGEX_ITEMS_BLOCK = /\[ITEMS(?:_JSON)?\]\s*([\s\S]*?)\s*\[\/.{0,5}ITEMS(?:_JSON)?\]/gi;
+// 함수 내에서 새 인스턴스를 생성하여 lastIndex 경합 방지
+const CHARACTERS_BLOCK_PATTERN = () => /\[CHARACTERS(?:_JSON)?\]\s*([\s\S]*?)\s*\[\/.{0,5}CHARACTERS(?:_JSON)?\]/gi;
+const EVENTS_BLOCK_PATTERN = () => /\[EVENTS(?:_JSON)?\]\s*([\s\S]*?)\s*\[\/.{0,5}EVENTS(?:_JSON)?\]/gi;
+const ITEMS_BLOCK_PATTERN = () => /\[ITEMS(?:_JSON)?\]\s*([\s\S]*?)\s*\[\/.{0,5}ITEMS(?:_JSON)?\]/gi;
 const REGEX_GROUP_HEADER = /^#\d+-\d+\s*\n?/;
 
 /**
@@ -561,12 +567,12 @@ function extractAndSaveCharacters(response, messageIndex) {
         return response;
     }
     
-    // 정규식 리셋
-    REGEX_CHARACTERS_BLOCK.lastIndex = 0;
+    // 정규식: 함수 내 새 인스턴스 생성으로 lastIndex 경합 방지
+    const charBlockRegex = CHARACTERS_BLOCK_PATTERN();
     let match;
     let extractedCount = 0;
     
-    while ((match = REGEX_CHARACTERS_BLOCK.exec(response)) !== null) {
+    while ((match = charBlockRegex.exec(response)) !== null) {
         if (match[1]) {
             const content = match[1].trim();
             log(`Found character block: ${content.substring(0, 100)}...`);
@@ -664,11 +670,11 @@ function extractAndSaveEvents(response, messageIndex) {
         return response;
     }
     
-    REGEX_EVENTS_BLOCK.lastIndex = 0;
+    const eventBlockRegex = EVENTS_BLOCK_PATTERN();
     let match;
     let extractedCount = 0;
     
-    while ((match = REGEX_EVENTS_BLOCK.exec(response)) !== null) {
+    while ((match = eventBlockRegex.exec(response)) !== null) {
         if (match[1]) {
             const content = match[1].trim();
             if (!content || content === '{}') continue;
@@ -759,11 +765,11 @@ function extractAndSaveItems(response, messageIndex) {
         return response;
     }
     
-    REGEX_ITEMS_BLOCK.lastIndex = 0;
+    const itemBlockRegex = ITEMS_BLOCK_PATTERN();
     let match;
     let extractedCount = 0;
     
-    while ((match = REGEX_ITEMS_BLOCK.exec(response)) !== null) {
+    while ((match = itemBlockRegex.exec(response)) !== null) {
         if (match[1]) {
             const content = match[1].trim();
             if (!content || content === '{}') continue;
@@ -870,7 +876,7 @@ export function parseBatchGroupsResponse(response, groups) {
             const endNum = group.indices[group.indices.length - 1];
             result[group.indices[0]] = `#${startNum}-${endNum}\n[⚠️ 불완전한 응답 - 재요약 필요]`;
             for (let i = 1; i < group.indices.length; i++) {
-                result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+                result[group.indices[i]] = makeGroupIncludedMarker(startNum, endNum);
             }
         }
         return result;
@@ -904,7 +910,7 @@ export function parseBatchGroupsResponse(response, groups) {
                 
                 // 나머지 인덱스는 그룹에 포함됨 표시
                 for (let i = 1; i < group.indices.length; i++) {
-                    result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+                    result[group.indices[i]] = makeGroupIncludedMarker(startNum, endNum);
                 }
                 matched = true;
                 break;
@@ -924,15 +930,15 @@ export function parseBatchGroupsResponse(response, groups) {
                     result[group.indices[0]] = `#${startNum}-${endNum}\n${fallbackSummary}`;
                 }
                 for (let i = 1; i < group.indices.length; i++) {
-                    result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+                    result[group.indices[i]] = makeGroupIncludedMarker(startNum, endNum);
                 }
                 log(`Fallback parsing succeeded for #${startNum}-${endNum}`);
             } else {
                 // 폴백도 실패 시 플레이스홀더 - 태그는 반드시 남김
                 log(`All parsing failed for #${startNum}-${endNum}, saving placeholder with tag`);
-                result[group.indices[0]] = `#${startNum}-${endNum}\n[❌ 요약 파싱 실패 - 재요약 필요]`;
+                result[group.indices[0]] = `#${startNum}-${endNum}\n${PARSING_FAILED_MARKER}`;
                 for (let i = 1; i < group.indices.length; i++) {
-                    result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+                    result[group.indices[i]] = makeGroupIncludedMarker(startNum, endNum);
                 }
             }
         }
@@ -946,7 +952,7 @@ export function parseBatchGroupsResponse(response, groups) {
             log(`Group #${startNum}-${endNum} was missing from results, adding placeholder`);
             result[group.indices[0]] = `#${startNum}-${endNum}\n[❌ 요약 누락 - 재요약 필요]`;
             for (let i = 1; i < group.indices.length; i++) {
-                result[group.indices[i]] = `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+                result[group.indices[i]] = makeGroupIncludedMarker(startNum, endNum);
             }
         }
     }
@@ -1187,7 +1193,7 @@ export async function runSummary(customStart = null, customEnd = null, onProgres
                                 }
                             } else {
                                 // 파싱 실패: 실패 마커 저장
-                                setSummaryForMessage(idx, `[❌ 요약 파싱 실패 - 재요약 필요]`);
+                                setSummaryForMessage(idx, PARSING_FAILED_MARKER);
                             }
                             processedCount++;
                         }
@@ -1427,7 +1433,7 @@ export async function resummarizeMessage(messageIndex) {
                 
                 // 나머지 인덱스는 그룹에 포함됨 표시
                 for (let i = startIdx + 1; i <= endIdx; i++) {
-                    setSummaryForMessage(i, `[→ #${groupStartNum}-${groupEndNum} 그룹 요약에 포함]`);
+                    setSummaryForMessage(i, makeGroupIncludedMarker(groupStartNum, groupEndNum));
                 }
             } else {
                 // 개별 요약 저장
@@ -1502,7 +1508,7 @@ export async function resummarizeMultipleGroups(groupRanges) {
             const endIdx = group.indices[group.indices.length - 1];
             const summary = parsed[startIdx];
             
-            if (summary && !summary.includes('파싱 실패') && !summary.includes('❌')) {
+            if (summary && !isParsingFailedContent(summary)) {
                 // 성공: 모든 인덱스에 저장
                 for (const idx of group.indices) {
                     setSummaryForMessage(idx, parsed[idx]);
@@ -1522,5 +1528,288 @@ export async function resummarizeMultipleGroups(groupRanges) {
     } catch (error) {
         logError('resummarizeMultipleGroups', error, { groupCount: groupRanges.length });
         return { success: false, successCount: 0, failCount: groupRanges.length, error: error.message };
+    }
+}
+
+// ===== 요약 압축 기능 =====
+
+// 압축 작업 상태
+const compressState = {
+    isRunning: false,
+    shouldCancel: false,
+    progress: { current: 0, total: 0 }
+};
+
+export function getCompressState() {
+    return { ...compressState };
+}
+
+export function cancelCompress() {
+    compressState.shouldCancel = true;
+}
+
+/**
+ * 요약 데이터에서 실제 압축 대상만 수집 (그룹 대표만, 참조 마커 제외)
+ * @param {Object} summaries - 전체 요약 데이터
+ * @param {number[]} targetKeys - 처리할 요약 키 목록
+ * @returns {Array<{key: number, content: string, isGroup: boolean, groupHeader: string}>}
+ */
+function collectCompressTargets(summaries, targetKeys) {
+    const targets = [];
+    
+    for (const i of targetKeys) {
+        const summary = summaries[i];
+        if (!summary) continue;
+        
+        const content = typeof summary === 'string' ? summary : (summary.content || '');
+        if (!content) continue;
+        
+        // 그룹 참조 마커([→ #0-4 그룹 요약에 포함])는 건너뛰기
+        if (isGroupIncludedContent(content)) continue;
+        
+        // 파싱 실패 마커도 건너뛰기
+        if (isParsingFailedContent(content)) continue;
+        
+        // 그룹 요약인지 확인 (#0-4 헤더로 시작)
+        const rangeMatch = content.match(/^#(\d+)-(\d+)/);
+        
+        targets.push({
+            key: i,
+            content: content,
+            isGroup: !!rangeMatch,
+            groupHeader: rangeMatch ? `#${rangeMatch[1]}-${rangeMatch[2]}` : `#${i}`
+        });
+    }
+    
+    return targets;
+}
+
+/**
+ * 기존 요약들을 AI를 통해 배치 단위로 압축
+ * @param {number[]} targetKeys - 압축 대상 요약 키 목록
+ * @param {number[]} pinnedIndices - (deprecated, ignored) 고정된 요약 인덱스들
+ * @param {Function} onProgress - 진행률 콜백 (current, total, status)
+ * @returns {Promise<{success: boolean, originalSummaries: Object, compressedSummaries: Object, error?: string, cancelled?: boolean}>}
+ */
+export async function compressSummaries(targetKeys, pinnedIndices = [], onProgress = null) {
+    if (compressState.isRunning) {
+        return { success: false, error: '이미 압축이 진행 중입니다.' };
+    }
+    
+    compressState.isRunning = true;
+    compressState.shouldCancel = false;
+    
+    try {
+        const context = getContext();
+        const chat = context?.chat;
+        
+        if (!chat || chat.length === 0) {
+            return { success: false, error: '채팅 데이터가 없습니다.' };
+        }
+        
+        const summaryData = getSummaryData();
+        const summaries = summaryData?.summaries || {};
+        
+        // 실제 압축 대상 수집 (그룹 참조 마커 제외, 핀 고정 포함)
+        const targets = collectCompressTargets(summaries, targetKeys);
+        
+        if (targets.length === 0) {
+            return { success: false, error: '압축할 요약이 없습니다.' };
+        }
+        
+        // 배치 분할 (고정 25개)
+        const BATCH_SIZE = 25;
+        const batches = [];
+        for (let i = 0; i < targets.length; i += BATCH_SIZE) {
+            batches.push(targets.slice(i, i + BATCH_SIZE));
+        }
+        
+        const originalSummaries = {};
+        const compressedSummaries = {};
+        compressState.progress = { current: 0, total: targets.length };
+        
+        log(`[압축] ${targets.length}개 요약을 ${batches.length}개 배치로 압축 시작`);
+        
+        for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+            // 취소 확인
+            if (compressState.shouldCancel) {
+                log(`[압축] 사용자에 의해 취소됨 (${Object.keys(compressedSummaries).length}개 완료)`);
+                return { success: false, cancelled: true, originalSummaries, compressedSummaries, error: '사용자에 의해 취소되었습니다.' };
+            }
+            
+            const batch = batches[batchIdx];
+            
+            // 배치 내 요약 텍스트 조합 (그룹 헤더 유지)
+            const summaryText = batch
+                .map(t => `${t.groupHeader}\n${t.content.replace(/^#\d+(?:-\d+)?\s*\n?/, '').trim()}`)
+                .join('\n\n');
+            
+            // 원본 저장
+            for (const t of batch) {
+                originalSummaries[t.key] = t.content;
+            }
+            
+            // 진행률 업데이트
+            if (onProgress) {
+                onProgress(compressState.progress.current, targets.length, `배치 ${batchIdx + 1}/${batches.length} 처리 중...`);
+            }
+            
+            // API 호출 (재시도 로직 포함)
+            const prompt = DEFAULT_COMPRESS_PROMPT_TEMPLATE + '\n\n---\n\n' + summaryText;
+            let response = null;
+            const MAX_RETRIES = 3;
+            
+            // API 호출 전 취소 확인
+            if (compressState.shouldCancel) {
+                log(`[압축] 사용자에 의해 취소됨 (${Object.keys(compressedSummaries).length}개 완료)`);
+                return { success: false, cancelled: true, originalSummaries, compressedSummaries, error: '사용자에 의해 취소되었습니다.' };
+            }
+            
+            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+                try {
+                    response = await callSummaryAPI(prompt);
+                    break; // 성공 시 루프 탈출
+                } catch (apiError) {
+                    const isRateLimit = apiError.message?.includes('high demand') ||
+                        apiError.message?.includes('rate') ||
+                        apiError.message?.includes('429') ||
+                        apiError.message?.includes('500') ||
+                        apiError.message?.includes('overloaded');
+                    
+                    if (isRateLimit && attempt < MAX_RETRIES - 1) {
+                        const delay = (attempt + 1) * 10; // 10초, 20초, 30초
+                        log(`[압축] 배치 ${batchIdx + 1} API 과부하, ${delay}초 후 재시도 (${attempt + 1}/${MAX_RETRIES})`);
+                        if (onProgress) {
+                            onProgress(compressState.progress.current, targets.length, `API 과부하 - ${delay}초 대기 후 재시도...`);
+                        }
+                        await new Promise(r => setTimeout(r, delay * 1000));
+                        
+                        if (compressState.shouldCancel) {
+                            return { success: false, cancelled: true, originalSummaries, compressedSummaries, error: '사용자에 의해 취소되었습니다.' };
+                        }
+                    } else {
+                        log(`[압축] 배치 ${batchIdx + 1} API 오류: ${apiError.message}`);
+                        break;
+                    }
+                }
+            }
+            
+            if (!response) {
+                log(`[압축] 배치 ${batchIdx + 1} 응답 없음, 건너뜀`);
+                compressState.progress.current += batch.length;
+                continue;
+            }
+            
+            // 응답 파싱 - 그룹 헤더(#0-4) 보존
+            const parsed = parseCompressedResponse(response, batch);
+            
+            for (const [key, content] of Object.entries(parsed)) {
+                compressedSummaries[key] = content;
+            }
+            
+            compressState.progress.current += batch.length;
+            
+            if (onProgress) {
+                onProgress(compressState.progress.current, targets.length, `${compressState.progress.current}/${targets.length} 완료`);
+            }
+            
+            // 배치 간 딜레이 (API 과부하 방지)
+            if (batchIdx < batches.length - 1) {
+                await new Promise(r => setTimeout(r, 3000));
+            }
+        }
+        
+        // 루프 완료 후 취소 확인 (단일 배치에서 API 호출 중 취소된 경우)
+        if (compressState.shouldCancel) {
+            log(`[압축] 사용자에 의해 취소됨 (${Object.keys(compressedSummaries).length}개 완료)`);
+            return { success: false, cancelled: true, originalSummaries, compressedSummaries, error: '사용자에 의해 취소되었습니다.' };
+        }
+        
+        if (Object.keys(compressedSummaries).length === 0) {
+            return { success: false, error: '압축된 요약을 파싱하지 못했습니다.' };
+        }
+        
+        log(`[압축] ${Object.keys(compressedSummaries).length}개 요약 압축 완료`);
+        
+        return { success: true, originalSummaries, compressedSummaries };
+        
+    } catch (error) {
+        logError('compressSummaries', error);
+        return { success: false, error: error.message };
+    } finally {
+        compressState.isRunning = false;
+        compressState.shouldCancel = false;
+    }
+}
+
+/**
+ * 압축 응답 파싱 (그룹 헤더 보존)
+ * @param {string} response - AI 응답
+ * @param {Array} batch - 원본 배치 타겟 목록
+ * @returns {Object} - key별 압축된 요약 (그룹 헤더 포함)
+ */
+function parseCompressedResponse(response, batch) {
+    const result = {};
+    
+    // #숫자 또는 #숫자-숫자 패턴으로 분리
+    const sections = response.split(/(?=^#\d+(?:-\d+)?)/m);
+    
+    for (const section of sections) {
+        const trimmed = section.trim();
+        if (!trimmed) continue;
+        
+        // 헤더 추출
+        const headerMatch = trimmed.match(/^#(\d+)(?:-(\d+))?/);
+        if (!headerMatch) continue;
+        
+        const startNum = parseInt(headerMatch[1]);
+        const endNum = headerMatch[2] ? parseInt(headerMatch[2]) : startNum;
+        
+        // 헤더 제거 후 내용 추출
+        const bodyContent = trimmed.replace(/^#\d+(?:-\d+)?\s*\n?/, '').trim();
+        if (!bodyContent) continue;
+        
+        // 매칭되는 배치 타겟 찾기
+        const matchingTarget = batch.find(t => {
+            if (t.isGroup) {
+                const rm = t.content.match(/^#(\d+)-(\d+)/);
+                if (rm) return parseInt(rm[1]) === startNum && parseInt(rm[2]) === endNum;
+            }
+            return t.key === startNum;
+        });
+        
+        if (matchingTarget) {
+            // 그룹 요약이면 #X-Y 헤더 다시 붙여서 저장
+            if (matchingTarget.isGroup) {
+                result[matchingTarget.key] = `#${startNum}-${endNum}\n${bodyContent}`;
+            } else {
+                result[matchingTarget.key] = bodyContent;
+            }
+        }
+    }
+    
+    return result;
+}
+
+/**
+ * 압축된 요약들을 실제로 적용 (그룹 구조 보존)
+ * @param {Object} compressedSummaries - key별 압축된 요약
+ * @returns {Promise<boolean>}
+ */
+export async function applyCompressedSummaries(compressedSummaries) {
+    try {
+        for (const [key, content] of Object.entries(compressedSummaries)) {
+            setSummaryForMessage(parseInt(key), content);
+        }
+        
+        await saveSummaryData();
+        injectSummaryToPrompt();
+        
+        log(`[압축 적용] ${Object.keys(compressedSummaries).length}개 요약 적용 완료`);
+        return true;
+        
+    } catch (error) {
+        logError('applyCompressedSummaries', error);
+        return false;
     }
 }

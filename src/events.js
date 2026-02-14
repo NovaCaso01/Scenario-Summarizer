@@ -3,9 +3,7 @@
  */
 
 import { eventSource, event_types } from "../../../../../script.js";
-import { extension_settings } from "../../../../extensions.js";
-import { extensionName } from './constants.js';
-import { log, getSettings, setChatLoadingCooldown, isChatLoadingCooldown, setGenerationLock, clearGenerationLock, isGenerationInProgress, isSummarizing, logError } from './state.js';
+import { log, getSettings, setChatLoadingCooldown, isChatLoadingCooldown, setGenerationLock, clearGenerationLock, isGenerationInProgress, isSummarizing } from './state.js';
 import { getSummaryData, saveSummaryData, remapSummariesAfterDeletion, invalidateSummaryOnSwipe } from './storage.js';
 import { runAutoSummary } from './summarizer.js';
 import { applyMessageVisibility, clearMessageElementCache } from './visibility.js';
@@ -13,6 +11,10 @@ import { injectSummaryToPrompt, clearInjection } from './injection.js';
 
 // UI 업데이트 콜백 (index.js에서 설정)
 let onStatusUpdateCallback = null;
+
+// 자동 요약 중복 실행 방지 타임스탬프
+let lastAutoSummaryTime = 0;
+const AUTO_SUMMARY_COOLDOWN_MS = 3000; // 3초 쿨다운
 
 /**
  * UI 업데이트 콜백 설정
@@ -91,6 +93,13 @@ async function onMessageReceived(messageId) {
     }
     
     log('자동 요약 실행 중...');
+    // 중복 실행 방지: 최근 실행 시간 체크
+    const now = Date.now();
+    if (now - lastAutoSummaryTime < AUTO_SUMMARY_COOLDOWN_MS) {
+        log('자동 요약 스킵: 쿨다운 중 (중복 트리거 방지)');
+        return;
+    }
+    lastAutoSummaryTime = now;
     // 자동 요약 실행
     await runAutoSummary();
     triggerStatusUpdate();
@@ -141,6 +150,13 @@ async function onGenerationEndedWithAutoSummary() {
             }
             
             log('GENERATION_ENDED에서 자동 요약 실행 중...');
+            // 중복 실행 방지: 최근 실행 시간 체크
+            const now = Date.now();
+            if (now - lastAutoSummaryTime < AUTO_SUMMARY_COOLDOWN_MS) {
+                log('자동 요약 스킵: 쿨다운 중 (중복 트리거 방지)');
+                return;
+            }
+            lastAutoSummaryTime = now;
             await runAutoSummary();
             triggerStatusUpdate();
         } catch (error) {

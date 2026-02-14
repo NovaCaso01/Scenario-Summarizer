@@ -301,6 +301,7 @@
 
 #scenario-summarizer-popup * {
     font-family: inherit;
+    box-sizing: border-box;
 }
 
 #scenario-summarizer-popup.open {
@@ -317,8 +318,10 @@
     width: 100vw;
     height: 100vh;
     background: var(--sum-overlay);
-    backdrop-filter: blur(3px);
+    backdrop-filter: blur(2px);
+    -webkit-backdrop-filter: blur(2px);
     z-index: 0;
+    will-change: transform; /* GPU 레이어 승격: 스크롤 시 repaint 방지 */
 }
 
 /* 팝업 콘텐츠 */
@@ -666,6 +669,7 @@
     overflow-y: auto;
     -webkit-overflow-scrolling: touch; /* iOS 부드러운 스크롤 */
     padding: var(--summarizer-spacing-xl);
+    transform: translateZ(0); /* GPU 레이어 승격: 스크롤 시 repaint 범위 격리 */
 }
 
 .summarizer-tab-content {
@@ -1058,6 +1062,16 @@
 }
 
 .summarizer-btn-stop:hover {
+    filter: brightness(0.9);
+}
+
+.summarizer-btn-warning {
+    background: var(--sum-warning);
+    color: #fff;
+    font-weight: 600;
+}
+
+.summarizer-btn-warning:hover {
     filter: brightness(0.9);
 }
 
@@ -1550,6 +1564,178 @@
     margin-bottom: 0;
 }
 
+/* 요약 개수 + 설정 영역 */
+.summarizer-compress-config {
+    padding: var(--summarizer-spacing-md);
+    background: var(--sum-bg-secondary);
+    border: 1px solid var(--sum-border-light);
+    border-radius: var(--summarizer-radius-md);
+    margin-bottom: var(--summarizer-spacing-md);
+}
+
+.summarizer-compress-info-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--summarizer-spacing-sm);
+}
+
+.summarizer-compress-summary-count {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--sum-text-secondary);
+}
+
+.summarizer-compress-summary-count i {
+    color: var(--sum-accent);
+    font-size: 12px;
+}
+
+.summarizer-compress-summary-count strong {
+    color: var(--sum-accent);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.summarizer-compress-pin-hint {
+    font-size: 11px;
+    color: var(--sum-text-hint);
+}
+
+.summarizer-compress-pin-hint i {
+    font-size: 10px;
+    margin-right: 2px;
+}
+
+.summarizer-compress-range-section {
+    padding-top: var(--summarizer-spacing-sm);
+    border-top: 1px solid var(--sum-border-light);
+}
+
+.summarizer-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--sum-text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+}
+
+/* 범위 라디오 그룹 */
+.summarizer-range-radio-group {
+    display: flex;
+    gap: 4px;
+}
+
+.summarizer-range-radio {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 5px 8px;
+    border-radius: var(--summarizer-radius-sm);
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--sum-text-primary);
+    transition: background 0.15s;
+    flex-shrink: 0;
+}
+
+.summarizer-range-radio:hover {
+    background: var(--sum-bg-tertiary);
+}
+
+.summarizer-range-radio input[type="radio"] {
+    accent-color: var(--sum-accent);
+    margin: 0;
+    cursor: pointer;
+    width: 13px;
+    height: 13px;
+}
+
+.summarizer-range-count-input {
+    width: 56px;
+    padding: 2px 4px;
+    background: var(--sum-bg-input);
+    border: 1px solid var(--sum-border);
+    border-radius: var(--summarizer-radius-sm);
+    color: var(--sum-text-primary);
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    transition: border-color 0.15s, opacity 0.15s;
+    -moz-appearance: textfield; /* Firefox 스피너 제거 */
+}
+
+/* Chrome, Safari, Edge 스피너 버튼 제거 */
+.summarizer-range-count-input::-webkit-inner-spin-button,
+.summarizer-range-count-input::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.summarizer-range-count-input:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.summarizer-range-count-input:not(:disabled):focus {
+    border-color: var(--sum-accent);
+    outline: none;
+}
+
+.summarizer-range-count-unit {
+    font-size: 11px;
+    color: var(--sum-text-hint);
+}
+
+/* 압축/에피소드 진행률 (수동 요약 진행 bar와 동일) */
+.summarizer-task-progress {
+    margin-bottom: var(--summarizer-spacing-md);
+    padding: var(--summarizer-spacing-sm) var(--summarizer-spacing-md);
+    background: var(--sum-bg-tertiary);
+    border-radius: var(--summarizer-radius-md);
+    border: 1px solid var(--sum-border);
+}
+
+.summarizer-task-progress .summarizer-progress-bar {
+    width: 100%;
+    height: 8px;
+    background: var(--sum-border);
+    border-radius: 4px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+
+.summarizer-task-progress .summarizer-progress-fill {
+    height: 100%;
+    background: var(--sum-accent);
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.summarizer-task-progress .summarizer-progress-text {
+    font-size: 11px;
+    color: var(--sum-text-muted);
+    text-align: center;
+    line-height: 1.3;
+    margin-bottom: 10px;
+}
+
+.summarizer-task-progress .summarizer-btn {
+    margin-top: 2px;
+}
+
+/* 결과 미리보기 영역 */
+.summarizer-compress-result-area {
+    min-height: 0;
+}
+
+.summarizer-compress-result-area:empty {
+    display: none;
+}
+
 /* ===== 진행 상태 ===== */
 #summarizer-progress {
     margin-top: var(--summarizer-spacing-lg);
@@ -1637,6 +1823,7 @@
     max-height: 320px;
     overflow-y: auto;
     padding: var(--summarizer-spacing-lg);
+    transform: translateZ(0); /* GPU 레이어 승격: 스크롤 시 repaint 방지 */
 }
 
 .summarizer-summary-header {
@@ -1764,6 +1951,327 @@ pre.summarizer-entry-content {
     word-break: break-word;
     margin: 0;
     line-height: 1.6;
+}
+
+/* ===== 핀 고정된 요약 ===== */
+.summarizer-entry-pinned {
+    border-left: 3px solid var(--sum-accent);
+    background: color-mix(in srgb, var(--sum-accent) 5%, var(--sum-shadow));
+}
+
+.summarizer-pin-entry.active {
+    color: var(--sum-accent) !important;
+}
+
+.summarizer-pin-entry.active i {
+    color: var(--sum-accent) !important;
+}
+
+/* ===== 잘린(미전달) 요약 ===== */
+.summarizer-entry-skipped {
+    border-left: 3px solid var(--sum-border-light);
+    background: color-mix(in srgb, var(--sum-bg-secondary) 60%, var(--sum-bg-primary));
+}
+
+.summarizer-entry-skipped .summarizer-entry-content {
+    color: var(--sum-text-secondary);
+}
+
+.summarizer-entry-skipped .summarizer-entry-number {
+    color: var(--sum-text-muted);
+}
+
+.summarizer-skipped-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 7px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: var(--sum-bg-primary);
+    background: var(--sum-text-hint);
+    border-radius: 10px;
+    cursor: help;
+    vertical-align: middle;
+    line-height: 1.4;
+}
+
+/* ===== 미전달 구분선 ===== */
+.summarizer-skipped-divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 12px 0 8px;
+    padding: 0 4px;
+}
+
+.summarizer-skipped-divider-line {
+    flex: 1;
+    height: 1px;
+    background: var(--sum-border-light);
+}
+
+.summarizer-skipped-divider-label {
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--sum-text-hint);
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+/* ===== 필터 버튼 활성 상태 ===== */
+#summarizer-filter-pinned-memo.active {
+    background: var(--sum-accent) !important;
+    color: var(--sum-accent-text) !important;
+    border-color: var(--sum-accent) !important;
+}
+
+/* ===== 사용자 메모 ===== */
+.summarizer-entry-memo {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    font-size: 12px;
+    color: var(--sum-text-muted);
+    background: var(--sum-bg-secondary);
+    border-radius: var(--summarizer-radius-sm);
+    border-left: 2px solid var(--sum-warning);
+}
+
+.summarizer-entry-memo i {
+    color: var(--sum-warning);
+    font-size: 11px;
+}
+
+.summarizer-entry-memo-area {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--sum-border-light);
+}
+
+.summarizer-memo-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--sum-bg-input);
+    border: 1px solid var(--sum-border);
+    border-radius: var(--summarizer-radius-md);
+    color: var(--sum-text-primary);
+    font-size: 12px;
+    box-sizing: border-box;
+    margin-bottom: 8px;
+}
+
+.summarizer-memo-input:focus {
+    border-color: var(--sum-accent);
+    outline: none;
+}
+
+/* ===== 항목 일괄 삭제 패널 ===== */
+.summarizer-bulk-delete-panel {
+    margin: 0;
+    padding: 0;
+    background: var(--sum-bg-secondary);
+    border: none;
+    border-bottom: 1px solid var(--sum-border);
+    border-radius: 0;
+    overflow: hidden;
+    animation: bulkDeleteSlideIn 0.2s ease-out;
+}
+
+@keyframes bulkDeleteSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+.summarizer-bulk-delete-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--summarizer-spacing-md) var(--summarizer-spacing-lg);
+    background: var(--sum-bg-tertiary);
+    border-bottom: 1px solid var(--sum-border-light);
+}
+
+.summarizer-bulk-delete-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.summarizer-bulk-delete-header-left .bulk-delete-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--sum-danger);
+    color: #fff;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.summarizer-bulk-delete-header-left strong {
+    font-size: 13px;
+    color: var(--sum-text-primary);
+    font-weight: 600;
+}
+
+.summarizer-bulk-delete-header-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.summarizer-bulk-delete-header-right .bulk-select-toggle {
+    padding: 4px 10px;
+    font-size: 11px;
+    color: var(--sum-text-muted);
+    background: var(--sum-bg-input);
+    border: 1px solid var(--sum-border-light);
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    font-family: inherit;
+    white-space: nowrap;
+}
+
+.summarizer-bulk-delete-header-right .bulk-select-toggle:hover {
+    color: var(--sum-text-primary);
+    border-color: var(--sum-border-focus);
+    background: var(--sum-bg-hover);
+}
+
+.summarizer-bulk-delete-body {
+    padding: var(--summarizer-spacing-md) var(--summarizer-spacing-lg);
+}
+
+.summarizer-bulk-delete-hint {
+    display: block;
+    font-size: 11px;
+    color: var(--sum-text-hint);
+    margin-bottom: var(--summarizer-spacing-sm);
+}
+
+.summarizer-bulk-delete-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: var(--summarizer-spacing-md);
+    max-height: 180px;
+    overflow-y: auto;
+    padding: 2px;
+}
+
+.summarizer-bulk-delete-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 14px 7px 10px;
+    background: var(--sum-bg-input);
+    border: 1.5px solid var(--sum-border-light);
+    border-radius: 20px;
+    cursor: pointer;
+    transition: all 0.18s ease;
+    font-size: 12px;
+    user-select: none;
+    line-height: 1;
+}
+
+.summarizer-bulk-delete-item:hover {
+    border-color: var(--sum-border-focus);
+    background: var(--sum-bg-hover);
+    box-shadow: 0 1px 4px var(--sum-shadow);
+}
+
+.summarizer-bulk-delete-item:has(input:checked) {
+    border-color: var(--sum-danger);
+    background: color-mix(in srgb, var(--sum-danger) 8%, var(--sum-bg-input));
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--sum-danger) 15%, transparent);
+}
+
+.summarizer-bulk-delete-item:has(input:checked) .summarizer-bulk-delete-label {
+    color: var(--sum-danger);
+}
+
+.summarizer-bulk-delete-item:has(input:checked) .summarizer-bulk-delete-count {
+    background: var(--sum-danger);
+    color: #fff;
+}
+
+.summarizer-bulk-delete-item input[type="checkbox"] {
+    display: none;
+}
+
+.summarizer-bulk-delete-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    border-radius: 4px;
+    border: 1.5px solid var(--sum-border);
+    background: var(--sum-bg-input);
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+    font-size: 9px;
+    color: transparent;
+}
+
+.summarizer-bulk-delete-item:has(input:checked) .summarizer-bulk-delete-check {
+    background: var(--sum-danger);
+    border-color: var(--sum-danger);
+    color: #fff;
+}
+
+.summarizer-bulk-delete-label {
+    color: var(--sum-text-primary);
+    font-weight: 500;
+    transition: color 0.15s ease;
+}
+
+.summarizer-bulk-delete-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 9px;
+    background: var(--sum-bg-tertiary);
+    color: var(--sum-text-muted);
+    font-size: 10px;
+    font-weight: 600;
+    transition: all 0.15s ease;
+    line-height: 1;
+}
+
+.summarizer-bulk-delete-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: var(--summarizer-spacing-sm) var(--summarizer-spacing-lg) var(--summarizer-spacing-md);
+    border-top: 1px solid var(--sum-border-light);
+    background: var(--sum-bg-secondary);
+}
+
+.summarizer-bulk-delete-selected-info {
+    font-size: 12px;
+    color: var(--sum-text-muted);
+    transition: color 0.15s ease;
+}
+
+.summarizer-bulk-delete-selected-info.has-selection {
+    color: var(--sum-danger);
+    font-weight: 500;
+}
+
+.summarizer-bulk-delete-actions {
+    display: flex;
+    gap: var(--summarizer-spacing-sm);
 }
 
 .summarizer-entry-content mark {
@@ -2859,6 +3367,212 @@ pre.summarizer-entry-content {
     border-top: 1px solid var(--sum-border-light);
 }
 
+.summarizer-modal-footer-extra {
+    display: flex;
+    align-items: center;
+    padding: var(--summarizer-spacing-sm) var(--summarizer-spacing-lg);
+    background: var(--sum-bg-tertiary);
+    border-top: 1px solid var(--sum-border-light);
+}
+
+/* 큰 모달 (압축 등) */
+.summarizer-modal-large {
+    max-width: 600px;
+}
+
+/* 모달 경고 박스 */
+.summarizer-modal-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--summarizer-spacing-sm);
+    padding: var(--summarizer-spacing-md);
+    margin-bottom: var(--summarizer-spacing-md);
+    background: color-mix(in srgb, var(--sum-warning) 10%, var(--sum-bg-secondary));
+    border: 1px solid color-mix(in srgb, var(--sum-warning) 30%, transparent);
+    border-radius: var(--summarizer-radius-md);
+    color: var(--sum-text-primary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.summarizer-modal-warning i {
+    color: var(--sum-warning);
+    font-size: 16px;
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+/* 압축 비교 표시 */
+.summarizer-compress-comparison {
+    display: flex;
+    flex-direction: column;
+    gap: var(--summarizer-spacing-sm);
+    white-space: normal;
+}
+
+.summarizer-compress-stats {
+    padding: var(--summarizer-spacing-sm) var(--summarizer-spacing-md);
+    background: color-mix(in srgb, var(--sum-accent) 10%, var(--sum-bg-secondary));
+    border-radius: var(--summarizer-radius-sm);
+    font-size: 12px;
+}
+
+.summarizer-compress-stats span {
+    color: var(--sum-text-muted);
+    margin-left: 8px;
+}
+
+.summarizer-compress-item {
+    display: flex;
+    flex-direction: column;
+    padding: 0;
+    background: var(--sum-bg-secondary);
+    border: 1px solid var(--sum-border-light);
+    border-radius: var(--summarizer-radius-md);
+    overflow: hidden;
+}
+
+.summarizer-compress-header {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--sum-accent);
+    padding: var(--summarizer-spacing-sm) var(--summarizer-spacing-md);
+    background: var(--sum-bg-tertiary);
+    border-bottom: 1px solid var(--sum-border-light);
+}
+
+.summarizer-compress-pair {
+    display: flex;
+    flex-direction: column;
+}
+
+.summarizer-compress-original,
+.summarizer-compress-result {
+    position: relative;
+    padding: var(--summarizer-spacing-sm) var(--summarizer-spacing-md);
+    padding-left: calc(var(--summarizer-spacing-md) + 4px);
+}
+
+.summarizer-compress-original {
+    border-left: 3px solid var(--sum-text-hint);
+    background: var(--sum-bg-secondary);
+}
+
+.summarizer-compress-result {
+    border-left: 3px solid var(--sum-success);
+    background: color-mix(in srgb, var(--sum-success) 4%, var(--sum-bg-secondary));
+}
+
+.summarizer-compress-tag {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-bottom: 4px;
+    line-height: 1.4;
+}
+
+.summarizer-compress-original .summarizer-compress-tag {
+    color: var(--sum-text-muted);
+    background: var(--sum-bg-tertiary);
+}
+
+.summarizer-compress-result .summarizer-compress-tag {
+    color: var(--sum-success);
+    background: color-mix(in srgb, var(--sum-success) 12%, var(--sum-bg-tertiary));
+}
+
+.summarizer-compress-content {
+    font-size: 11px;
+    line-height: 1.5;
+    max-height: 150px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--sum-text-primary);
+}
+
+/* 압축 통계 바 */
+.summarizer-compress-stats-bar {
+    display: flex;
+    align-items: center;
+    gap: var(--summarizer-spacing-md);
+    padding: var(--summarizer-spacing-sm) var(--summarizer-spacing-md);
+    background: color-mix(in srgb, var(--sum-success) 10%, var(--sum-bg-secondary));
+    border: 1px solid color-mix(in srgb, var(--sum-success) 30%, transparent);
+    border-radius: var(--summarizer-radius-md);
+    margin-bottom: var(--summarizer-spacing-md);
+    font-size: 13px;
+}
+
+.summarizer-compress-stats-count {
+    color: var(--sum-success);
+    font-weight: 600;
+}
+
+.summarizer-compress-stats-pinned {
+    color: var(--sum-warning);
+    font-weight: 500;
+}
+
+/* 토큰 절약 통계 */
+.summarizer-compress-token-stats {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--summarizer-spacing-sm) var(--summarizer-spacing-md);
+    padding: var(--summarizer-spacing-sm) var(--summarizer-spacing-md);
+    background: var(--sum-bg-tertiary);
+    border: 1px solid var(--sum-border-light);
+    border-radius: var(--summarizer-radius-md);
+    margin-bottom: var(--summarizer-spacing-sm);
+    font-size: 12px;
+}
+
+.summarizer-token-stat {
+    color: var(--sum-text-secondary);
+    font-weight: 500;
+}
+
+.summarizer-token-stat i {
+    margin-right: 4px;
+    font-size: 11px;
+}
+
+.summarizer-token-saved {
+    color: var(--sum-success);
+    font-weight: 700;
+}
+
+/* 미리보기 플레이스홀더 및 오류 */
+.summarizer-preview-placeholder {
+    text-align: center;
+    color: var(--sum-text-muted);
+    padding: var(--summarizer-spacing-xl) var(--summarizer-spacing-md);
+    font-size: 13px;
+}
+
+.summarizer-preview-error {
+    text-align: center;
+    color: var(--sum-error);
+    padding: var(--summarizer-spacing-md);
+    background: color-mix(in srgb, var(--sum-error) 10%, var(--sum-bg-secondary));
+    border-radius: var(--summarizer-radius-md);
+    font-size: 12px;
+}
+
+/* 섹션 서브타이틀 */
+.summarizer-section-subtitle {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--sum-text-muted);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
 /* 반응형 - 모달 */
 @media screen and (max-width: 768px) {
     .summarizer-modal {
@@ -2877,6 +3591,10 @@ pre.summarizer-entry-content {
     .summarizer-modal-body {
         max-height: 55vh;
         overflow-y: auto;
+    }
+    
+    .summarizer-range-radio-group {
+        flex-wrap: wrap;
     }
 }
 
@@ -2901,6 +3619,17 @@ pre.summarizer-entry-content {
     
     .summarizer-modal-footer .summarizer-btn {
         width: 100%;
+    }
+    
+    .summarizer-range-radio-group {
+        flex-direction: column;
+        gap: 2px;
+    }
+    
+    .summarizer-compress-info-row {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
     }
 }
 
@@ -2958,7 +3687,126 @@ pre.summarizer-entry-content {
 
 /* 슬라이더, 체크박스, 토글은 SillyTavern 기본 스타일 사용 */
 
-/* ===== SillyTavern 테마 오버라이드 ===== */
+/* ===== SillyTavern 테마 격리 (CSS Isolation) ===== */
+/* SillyTavern 테마, 사용자 테마, 외부 확장의 CSS가 팝업 내부에 침투하는 것을 차단 */
+
+/* box-shadow, text-shadow 오염 차단 (와일드카드 * 대신 구체적 요소 지정 - 스크롤 성능 보존) */
+#scenario-summarizer-popup .summarizer-popup-content {
+    box-shadow: 0 12px 40px var(--sum-shadow) !important;
+}
+
+#scenario-summarizer-popup .summarizer-section,
+#scenario-summarizer-popup .summarizer-entry,
+#scenario-summarizer-popup .summarizer-tab,
+#scenario-summarizer-popup .summarizer-btn,
+#scenario-summarizer-popup .summarizer-input-group input,
+#scenario-summarizer-popup .summarizer-input-group select,
+#scenario-summarizer-popup .summarizer-category-item,
+#scenario-summarizer-popup .summarizer-radio-item,
+#scenario-summarizer-popup .summarizer-checkbox-item,
+#scenario-summarizer-popup .summarizer-legacy-entry,
+#scenario-summarizer-popup .summarizer-legacy-entry-preview,
+#scenario-summarizer-popup .summarizer-modal-inner,
+#scenario-summarizer-popup .summarizer-stats,
+#scenario-summarizer-popup .summarizer-stat-item,
+#scenario-summarizer-popup .summarizer-toggle-row,
+#scenario-summarizer-popup .summarizer-header,
+#scenario-summarizer-popup .summarizer-tabs {
+    box-shadow: none !important;
+    text-shadow: none !important;
+}
+
+#scenario-summarizer-popup .summarizer-bulk-delete-item:hover {
+    box-shadow: 0 1px 4px var(--sum-shadow) !important;
+}
+
+#scenario-summarizer-popup .summarizer-bulk-delete-item:has(input:checked) {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--sum-danger) 15%, transparent) !important;
+}
+
+#scenario-summarizer-popup .summarizer-event-card,
+#scenario-summarizer-popup .summarizer-item-card {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1) !important;
+}
+
+#scenario-summarizer-popup .summarizer-event-card:hover,
+#scenario-summarizer-popup .summarizer-item-card:hover {
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15) !important;
+}
+
+/* pre 요소 테마 오염 차단 (터미널 스타일 등) */
+#scenario-summarizer-popup pre {
+    position: relative !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    border: none !important;
+    overflow: visible !important;
+    background: transparent !important;
+    box-shadow: none !important;
+}
+
+#scenario-summarizer-popup pre::before {
+    content: none !important;
+    display: none !important;
+}
+
+#scenario-summarizer-popup pre::after {
+    content: none !important;
+    display: none !important;
+}
+
+/* 스크롤바 테마 오염 차단 - 팝업 내에서는 기본 스크롤바 표시 */
+#scenario-summarizer-popup ::-webkit-scrollbar {
+    display: block !important;
+    width: 6px !important;
+}
+
+#scenario-summarizer-popup ::-webkit-scrollbar-track {
+    background: var(--sum-bg-secondary) !important;
+    border-radius: 3px !important;
+}
+
+#scenario-summarizer-popup ::-webkit-scrollbar-thumb {
+    background: var(--sum-border) !important;
+    border-radius: 3px !important;
+}
+
+#scenario-summarizer-popup ::-webkit-scrollbar-thumb:hover {
+    background: var(--sum-text-hint) !important;
+}
+
+/* ::selection 테마 오염 차단 */
+#scenario-summarizer-popup ::selection {
+    background-color: var(--sum-accent) !important;
+    color: var(--sum-accent-text) !important;
+}
+
+/* font-family !important 오버라이드 차단 */
+#scenario-summarizer-popup,
+#scenario-summarizer-popup *:not([class*="fa-"]):not(.fa):not(.fas):not(.far):not(.fab):not(.fal):not(.fad):not(.fass):not(.fasr):not(.fasl):not(.fasd),
+#scenario-summarizer-popup input,
+#scenario-summarizer-popup select,
+#scenario-summarizer-popup textarea,
+#scenario-summarizer-popup button,
+#scenario-summarizer-popup span:not([class*="fa-"]):not(.fa):not(.fas):not(.far):not(.fab) {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    -webkit-text-stroke: 0 !important;
+}
+
+/* line-height 오염 차단 */
+#scenario-summarizer-popup input,
+#scenario-summarizer-popup select,
+#scenario-summarizer-popup button {
+    line-height: normal !important;
+}
+
+/* font-size 오염 차단 - 입력요소 */
+#scenario-summarizer-popup input,
+#scenario-summarizer-popup select,
+#scenario-summarizer-popup textarea {
+    font-size: inherit !important;
+}
+
 /* SillyTavern 테마가 강제로 색상을 덮어쓰는 것을 방지 */
 
 /* 아이콘 색상 강제 적용 */

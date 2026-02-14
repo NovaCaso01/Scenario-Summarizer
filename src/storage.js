@@ -4,7 +4,7 @@
 
 import { getContext, extension_settings } from "../../../../extensions.js";
 import { saveChatConditional } from "../../../../../script.js";
-import { extensionName, METADATA_KEY, DATA_VERSION } from './constants.js';
+import { extensionName, METADATA_KEY, DATA_VERSION, isGroupIncludedContent } from './constants.js';
 import { log, getSettings } from './state.js';
 
 /**
@@ -322,7 +322,7 @@ export function cleanupOrphanedSummaries() {
                     }
                 }
             }
-        } else if (content.includes('그룹 요약에 포함')) {
+        } else if (isGroupIncludedContent(content)) {
             // "→ #X-Y 그룹 요약에 포함" 형태의 참조 요약
             // 참조하는 그룹이 삭제되면 이것도 삭제됨 (아래에서 처리)
             const refMatch = content.match(/#(\d+)-(\d+)/);
@@ -363,10 +363,15 @@ export function setSummaryForMessage(messageIndex, content) {
     const data = getSummaryData();
     if (!data) return null;
     
+    // 기존 요약의 pinned/memo 보존
+    const existing = data.summaries[messageIndex];
+    
     const summary = {
         messageIndex: messageIndex,
         content: content,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        pinned: existing?.pinned || false,
+        memo: existing?.memo || ''
     };
     
     data.summaries[messageIndex] = summary;
@@ -403,8 +408,8 @@ export function deleteSummaryForMessage(messageIndex) {
             delete data.summaries[i];
         }
     } 
-    // "그룹 요약에 포함" 표시인 경우, 해당 그룹 전체 삭제
-    else if (String(content).includes('그룹 요약에 포함')) {
+    // 그룹 요약에 포함 표시인 경우, 해당 그룹 전체 삭제
+    else if (isGroupIncludedContent(String(content))) {
         const refMatch = String(content).match(/\[→ #(\d+)-(\d+) 그룹 요약에 포함\]/);
         if (refMatch) {
             const startIdx = parseInt(refMatch[1]);
@@ -776,7 +781,8 @@ export function searchSummaries(query) {
     
     for (const [index, summary] of Object.entries(summaries)) {
         const content = String(summary?.content ?? summary ?? '');
-        if (content.toLowerCase().includes(lowerQuery)) {
+        const memo = String(summary?.memo ?? '');
+        if (content.toLowerCase().includes(lowerQuery) || memo.toLowerCase().includes(lowerQuery)) {
             results.push({
                 messageIndex: parseInt(index),
                 content: content,
@@ -1099,7 +1105,7 @@ export function getRecentSummariesForContext(beforeIndex, count) {
             const summary = data.summaries[idx];
             const content = String(summary?.content ?? summary ?? '');
             // 그룹 요약에 포함된 항목 제외
-            if (!content.startsWith('[→') && !content.includes('그룹 요약에 포함')) {
+            if (!isGroupIncludedContent(content)) {
                 allSummaries.push({
                     // 현재 요약은 인계 요약보다 나중 (legacyCount를 더해서 순서 보장)
                     timeOrder: legacyCount + idx,
@@ -1156,28 +1162,46 @@ export function getPreviousContext(beforeIndex) {
     let location = '불명';
     let relationship = '불명';
     
+    // 다국어 카테고리 라벨 매칭 (ko/en/ja/zh)
+    const timePattern = /\* (?:시간|Time|時間|时间)[：:]\s*(.+)/i;
+    const locationPattern = /\* (?:장소|Location|場所|地点)[：:]\s*(.+)/i;
+    const relationshipPattern = /\* (?:관계|Relationship|関係|关系)[：:]\s*(.+)/i;
+    
+    // 다국어 "동일/불명" 필터 패턴
+    const sameValuePattern = /^(동일|동일함|same|unchanged|同じ|同上|不变|相同)$/i;
+    const unknownValuePattern = /^(불명|없음|unknown|N\/A|none|不明|不明確|未知)$/i;
+    
     for (const idx of prevIndices) {
         const summary = data.summaries[idx];
         const content = String(summary?.content ?? summary ?? '');
         
         if (time === '불명') {
-            const timeMatch = content.match(/\* 시간[：:]\s*(.+)/);
-            if (timeMatch && !timeMatch[1].includes('동일') && !timeMatch[1].includes('불명')) {
-                time = timeMatch[1].trim();
+            const timeMatch = content.match(timePattern);
+            if (timeMatch) {
+                const val = timeMatch[1].trim();
+                if (!sameValuePattern.test(val) && !unknownValuePattern.test(val)) {
+                    time = val;
+                }
             }
         }
         
         if (location === '불명') {
-            const locMatch = content.match(/\* 장소[：:]\s*(.+)/);
-            if (locMatch && !locMatch[1].includes('동일') && !locMatch[1].includes('불명')) {
-                location = locMatch[1].trim();
+            const locMatch = content.match(locationPattern);
+            if (locMatch) {
+                const val = locMatch[1].trim();
+                if (!sameValuePattern.test(val) && !unknownValuePattern.test(val)) {
+                    location = val;
+                }
             }
         }
         
         if (relationship === '불명') {
-            const relMatch = content.match(/\* 관계[：:]\s*(.+)/);
-            if (relMatch && !relMatch[1].includes('없음') && !relMatch[1].includes('불명')) {
-                relationship = relMatch[1].trim();
+            const relMatch = content.match(relationshipPattern);
+            if (relMatch) {
+                const val = relMatch[1].trim();
+                if (!sameValuePattern.test(val) && !unknownValuePattern.test(val)) {
+                    relationship = val;
+                }
             }
         }
         
@@ -1357,7 +1381,7 @@ export function importAsLegacySummaries(jsonString) {
                 const content = String(summary?.content ?? summary ?? '');
                 
                 // 그룹 요약에 포함된 항목은 건너뛰기
-                if (content.startsWith('[→') || content.includes('그룹 요약에 포함')) {
+                if (isGroupIncludedContent(content)) {
                     continue;
                 }
                 

@@ -13,13 +13,21 @@ import {
     DEFAULT_ITEM_PROMPT_TEMPLATE,
     getCharacterJsonCleanupPattern,
     getEventJsonCleanupPattern,
-    getItemJsonCleanupPattern
+    getItemJsonCleanupPattern,
+    isGroupIncludedContent,
+    isParsingFailedContent,
+    GROUP_INCLUDED_TEXT,
+    PARSING_FAILED_TEXT,
+    cleanJsonBlocks,
+    cleanCatalogSections,
+    extractJsonBlocks,
+    extractCatalogSections
 } from './constants.js';
 import { log, getSettings, requestStop, isSummarizing, getErrorLogs, getLastError, clearErrorLogs, logError } from './state.js';
 import { 
     getSummaryData, saveSummaryData, getRelevantSummaries, 
     setSummaryForMessage, deleteSummaryForMessage, clearAllSummaries,
-    exportSummaries, importSummaries, importSummariesFull, searchSummaries, searchLegacySummaries, getCharacterName,
+    exportSummaries, importSummaries, importSummariesFull, searchSummaries, searchLegacySummaries, getCharacterName, getCurrentChatId,
     getCharacters, getRelevantCharacters, getCharacter, setCharacter, deleteCharacter, clearCharactersData,
     formatCharactersText, mergeExtractedCharacters, cleanupOrphanedSummaries,
     getLegacySummaries, addLegacySummary, updateLegacySummary, deleteLegacySummary,
@@ -27,29 +35,21 @@ import {
     getEvents, getRelevantEvents, getEvent, addEvent, updateEvent, deleteEvent, clearEvents,
     getItems, getRelevantItems, getItem, addItem, updateItem, deleteItem, clearItems
 } from './storage.js';
-import { runSummary, resummarizeMessage, resummarizeMultipleGroups } from './summarizer.js';
+import { runSummary, resummarizeMessage, resummarizeMultipleGroups, compressSummaries, applyCompressedSummaries, getCompressState, cancelCompress } from './summarizer.js';
 import { applyMessageVisibility, restoreAllVisibility, getVisibilityStats } from './visibility.js';
-import { injectSummaryToPrompt, clearInjection, getInjectionPreview } from './injection.js';
+import { injectSummaryToPrompt, clearInjection, getInjectionPreview, getSkippedSummaryIndices, invalidateTokenCache } from './injection.js';
 import { updateEventListeners } from './events.js';
 import { loadModels, testApiConnection, getApiStatus } from './api.js';
 
-/**
- * 요약 콘텐츠에서 모든 JSON 블록 제거 (CHARACTERS, EVENTS, ITEMS)
- */
-function cleanJsonBlocks(content) {
-    if (!content) return content;
-    let cleaned = content;
-    cleaned = cleaned.replace(getCharacterJsonCleanupPattern(), '');
-    cleaned = cleaned.replace(getEventJsonCleanupPattern(), '');
-    cleaned = cleaned.replace(getItemJsonCleanupPattern(), '');
-    return cleaned.trim();
-}
 // 현재 페이지 (페이지네이션)
 let currentPage = 0;
 const ITEMS_PER_PAGE = 10;
 
 // 정렬 순서 (요약 보기): 'newest' = 최신순, 'oldest' = 오래된순
 let summarySortOrder = 'newest';
+
+// 필터 모드: 'all' = 전체, 'pinned' = 핀 고정만
+let summaryFilterMode = 'all';
 
 // 토큰 카운터 함수 (동적 로드)
 let getTokenCountAsync = null;
@@ -93,13 +93,16 @@ function saveSettings() {
 }
 
 /**
- * HTML 이스케이프
+ * HTML 이스케이프 (문자열 치환 방식)
  */
 function escapeHtml(text) {
     if (!text) return '';
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 }
 
 /**
@@ -273,7 +276,7 @@ export function updateUIFromSettings() {
     $("#summarizer-use-raw").prop("checked", settings.useRawPrompt);
     $("#summarizer-custom-url").val(settings.customApiUrl);
     $("#summarizer-custom-key").val(settings.customApiKey);
-    $("#summarizer-custom-max-tokens").val(settings.customApiMaxTokens || 4000);
+    $("#summarizer-custom-max-tokens").val(settings.customApiMaxTokens || 5000);
     $("#summarizer-custom-timeout").val(settings.customApiTimeout || 60);
     
     toggleCustomApiSection();
@@ -592,7 +595,7 @@ export function updateStatusDisplay() {
         if (index < totalMessages) {
             const summary = summaries[indexStr];
             const content = String(summary?.content ?? summary ?? '');
-            if (content.includes('파싱 실패') || content.includes('❌')) {
+            if (isParsingFailedContent(content)) {
                 errorCount++;
             }
         }
@@ -625,13 +628,8 @@ async function updateTokenUsage() {
     
     await initTokenCounter();
     
-    // 프롬프트에 주입될 내용 미리보기로 토큰 계산
-    const preview = await getInjectionPreview();
-    let currentTokens = 0;
-    
-    if (preview && preview.length > 0 && getTokenCountAsync) {
-        currentTokens = await getTokenCountAsync(preview);
-    }
+    // getInjectionPreview가 내부에서 이미 토큰을 계산하여 반환
+    const { tokens: currentTokens } = await getInjectionPreview();
     
     const percentage = Math.min(100, (currentTokens / maxTokens) * 100);
     
@@ -763,7 +761,7 @@ export async function resummmarizeFailedEntries() {
         const content = String(summary?.content ?? summary ?? '');
         
         // 파싱 실패 요약인지 확인
-        if (content.includes('파싱 실패') || content.includes('❌') || content.includes('불완전')) {
+        if (isParsingFailedContent(content) || content.includes('불완전')) {
             // 그룹 범위 추출
             let startIdx, endIdx;
             
@@ -908,8 +906,29 @@ export async function viewSummaries() {
     currentPage = 0;
     currentViewMode = 'current';
     updateViewModeButtons();
+    // skipped 인덱스를 최신 상태로 갱신
+    await injectSummaryToPrompt();
     await renderSummaryList();
     $("#summarizer-preview").show();
+}
+
+/**
+ * 핀 고정 필터 토글
+ */
+async function togglePinnedMemoFilter() {
+    summaryFilterMode = summaryFilterMode === 'all' ? 'pinned' : 'all';
+    currentPage = 0;
+    
+    const $btn = $("#summarizer-filter-pinned-memo");
+    if (summaryFilterMode === 'pinned') {
+        $btn.addClass('active');
+        $btn.attr('title', '전체 보기로 전환');
+    } else {
+        $btn.removeClass('active');
+        $btn.attr('title', '📌 핀 고정만 모아보기');
+    }
+    
+    await renderSummaryList();
 }
 
 /**
@@ -961,17 +980,28 @@ async function renderSummaryList() {
     );
     
     // 그룹 요약에 포함된 항목은 목록에서 제외
-    const indices = allIndices.filter(index => {
+    let indices = allIndices.filter(index => {
         const summary = summaries[index];
         const content = String(summary?.content ?? summary ?? '');
-        return !content.startsWith('[→') && !content.includes('그룹 요약에 포함');
+        return !isGroupIncludedContent(content);
     });
+    
+    // 핀 고정 필터 적용
+    if (summaryFilterMode === 'pinned') {
+        indices = indices.filter(index => {
+            const summary = summaries[index];
+            return summary?.pinned === true;
+        });
+    }
     
     const $content = $("#summarizer-preview-content");
     const $pagination = $("#summarizer-pagination");
     
     if (indices.length === 0) {
-        $content.html('<p class="summarizer-placeholder">저장된 요약이 없습니다.</p>');
+        const emptyMsg = summaryFilterMode === 'pinned' 
+            ? '핀 고정된 요약이 없습니다.'
+            : '저장된 요약이 없습니다.';
+        $content.html(`<p class="summarizer-placeholder">${emptyMsg}</p>`);
         $pagination.hide();
         return;
     }
@@ -991,7 +1021,7 @@ async function renderSummaryList() {
     for (const index of allIndices) {
         const summary = summaries[index];
         const content = String(summary?.content ?? summary ?? '');
-        if (!content.startsWith('[→') && !content.includes('그룹 요약에 포함')) {
+        if (!isGroupIncludedContent(content)) {
             allContent += content + '\n';
         }
     }
@@ -1002,16 +1032,30 @@ async function renderSummaryList() {
         totalTokens = await getTokenCountAsync(allContent);
     }
     
+    // 필터 모드 표시
+    const filterLabel = summaryFilterMode === 'pinned' ? ' · <i class="fa-solid fa-filter"></i> 핀 고정만' : '';
+    
     let html = `<div class="summarizer-summary-header">
         <strong>${getCharacterName()} 시나리오 요약</strong>
-        <small>총 ${indices.length}개 · ${totalTokens.toLocaleString()} 토큰</small>
+        <small>총 ${indices.length}개 · ${totalTokens.toLocaleString()} 토큰${filterLabel}</small>
     </div>`;
+    
+    // 잘린 요약 인덱스 가져오기 (토큰 예산 초과로 AI에게 전달 안 되는 요약)
+    const skippedIndices = getSkippedSummaryIndices();
+    const skippedCount = pageIndices.filter(i => skippedIndices.has(i)).length;
+    const includedCount = pageIndices.length - skippedCount;
+    
+    // 구분선 삽입을 위해 첫 번째 skipped 항목 감지
+    let skippedDividerInserted = false;
     
     for (const index of pageIndices) {
         const summary = summaries[index];
         const content = String(summary?.content ?? summary ?? '');
         const isInvalidated = summary?.invalidated === true;
         const invalidReason = summary?.invalidReason || '';
+        const isPinned = summary?.pinned === true;
+        const memo = summary?.memo || '';
+        const isSkipped = skippedIndices.has(index);
         
         // 날짜(요일) 포맷팅
         let dateDisplay = '';
@@ -1029,7 +1073,7 @@ async function renderSummaryList() {
         let displayNumber = rangeMatch ? `#${rangeMatch[1]}~${rangeMatch[2]}` : `#${index}`;
         
         // 파싱 오류/불완전 요약 감지
-        const hasParsingError = content.includes('파싱 실패') || content.includes('❌');
+        const hasParsingError = isParsingFailedContent(content);
         const hasWarning = content.includes('불완전한') || content.includes('⚠️') || content.includes('재요약 권장');
         const errorClass = hasParsingError ? ' summarizer-entry-error' : (hasWarning ? ' summarizer-entry-warning' : '');
         const errorBadge = hasParsingError ? '<span class="summarizer-error-badge" title="파싱 오류 - 재요약 필요">❌ 오류</span>' : 
@@ -1039,6 +1083,24 @@ async function renderSummaryList() {
         const invalidatedClass = isInvalidated ? ' summarizer-entry-invalidated' : '';
         const invalidatedBadge = isInvalidated ? `<span class="summarizer-invalidated-badge" title="${escapeHtml(invalidReason)}">⚠️ 무효화됨</span>` : '';
         
+        // 핀 고정 스타일
+        const pinnedClass = isPinned ? ' summarizer-entry-pinned' : '';
+        const pinnedIcon = isPinned ? 'fa-solid' : 'fa-regular';
+        
+        // 잘린 요약 스타일
+        const skippedClass = isSkipped ? ' summarizer-entry-skipped' : '';
+        const skippedBadge = isSkipped ? '<span class="summarizer-skipped-badge" title="토큰 예산 초과로 AI에게 전달되지 않는 요약입니다">미전달</span>' : '';
+        
+        // 구분선: 첫 번째 미전달 요약 앞에 삽입
+        if (isSkipped && !skippedDividerInserted && includedCount > 0) {
+            html += `<div class="summarizer-skipped-divider">
+                <span class="summarizer-skipped-divider-line"></span>
+                <span class="summarizer-skipped-divider-label">이하 미전달 (토큰 예산 초과)</span>
+                <span class="summarizer-skipped-divider-line"></span>
+            </div>`;
+            skippedDividerInserted = true;
+        }
+        
         // 표시용 content: 첫 줄의 헤더(#번호 또는 #번호-번호)는 제거 + JSON 블록 정리
         let displayContent = content;
         if (/^#\d+(-\d+)?\s*\n/.test(displayContent)) {
@@ -1046,12 +1108,22 @@ async function renderSummaryList() {
         }
         displayContent = cleanJsonBlocks(displayContent);
         
+        // 메모 영역 HTML
+        const memoHtml = memo 
+            ? `<div class="summarizer-entry-memo"><i class="fa-solid fa-sticky-note"></i> ${escapeHtml(memo)}</div>`
+            : '';
+        
         html += `
-        <div class="summarizer-entry${invalidatedClass}${errorClass}" data-msg-index="${index}">
+        <div class="summarizer-entry${invalidatedClass}${errorClass}${pinnedClass}${skippedClass}" data-msg-index="${index}">
             <div class="summarizer-entry-header">
-                <span class="summarizer-entry-number">${displayNumber}${invalidatedBadge}${errorBadge}</span>
-                ${dateDisplay ? `<span class="summarizer-entry-date">${dateDisplay}</span>` : ''}
+                <span class="summarizer-entry-number">${displayNumber}${invalidatedBadge}${errorBadge}${skippedBadge}</span>
                 <div class="summarizer-entry-actions">
+                    <button class="summarizer-btn summarizer-btn-tiny summarizer-pin-entry ${isPinned ? 'active' : ''}" data-idx="${index}" title="${isPinned ? '핀 해제' : '핀 고정 (토큰 예산 초과 시에도 우선 포함)'}">
+                        <i class="${pinnedIcon} fa-thumbtack"></i>
+                    </button>
+                    <button class="summarizer-btn summarizer-btn-tiny summarizer-memo-toggle" data-idx="${index}" title="${memo ? '메모 수정' : '메모 추가'}">
+                        <i class="fa-${memo ? 'solid' : 'regular'} fa-sticky-note"></i>
+                    </button>
                     <button class="summarizer-btn summarizer-btn-tiny summarizer-edit-entry" data-idx="${index}" title="수정">
                         <i class="fa-solid fa-pen"></i>
                     </button>
@@ -1063,9 +1135,24 @@ async function renderSummaryList() {
                     </button>
                 </div>
             </div>
+            ${memoHtml}
             <pre class="summarizer-entry-content">${escapeHtml(displayContent)}</pre>
+            <div class="summarizer-entry-memo-area" style="display:none;">
+                <input type="text" class="summarizer-memo-input" data-idx="${index}" placeholder="메모 입력 (검색 시 포함, AI에게는 미전달)" value="${escapeHtml(memo)}" maxlength="200" />
+                <div class="summarizer-entry-edit-buttons">
+                    <button class="summarizer-btn summarizer-btn-small summarizer-btn-success summarizer-save-memo" data-idx="${index}">
+                        <i class="fa-solid fa-check"></i> 저장
+                    </button>
+                    <button class="summarizer-btn summarizer-btn-small summarizer-btn-secondary summarizer-cancel-memo" data-idx="${index}">
+                        <i class="fa-solid fa-xmark"></i> 취소
+                    </button>
+                    ${memo ? `<button class="summarizer-btn summarizer-btn-small summarizer-btn-danger summarizer-delete-memo" data-idx="${index}">
+                        <i class="fa-solid fa-trash"></i> 삭제
+                    </button>` : ''}
+                </div>
+            </div>
             <div class="summarizer-entry-edit-area" style="display:none;">
-                <textarea class="summarizer-entry-textarea">${escapeHtml(content)}</textarea>
+                <textarea class="summarizer-entry-textarea">${escapeHtml(cleanJsonBlocks(content))}</textarea>
                 <div class="summarizer-entry-edit-buttons">
                     <button class="summarizer-btn summarizer-btn-small summarizer-btn-success summarizer-save-entry" data-idx="${index}">
                         <i class="fa-solid fa-check"></i> 저장
@@ -1132,17 +1219,23 @@ async function renderSummaryList() {
         $pagination.hide();
         $("#summarizer-page-jump").hide();
     }
-    
-    // 이벤트 바인딩
-    bindEntryEvents();
 }
 
+// ===== 이벤트 위임 플래그 =====
+let _entryDelegationBound = false;
+
 /**
- * 개별 항목 이벤트 바인딩
+ * 요약 항목 이벤트 위임 (1회만 바인딩, 부모 컨테이너에 위임)
+ * renderSummaryList에서 매번 호출하는 대신 initUI에서 1회만 호출
  */
-function bindEntryEvents() {
+function bindEntryEventsDelegated() {
+    if (_entryDelegationBound) return;
+    _entryDelegationBound = true;
+    
+    const $container = $("#summarizer-preview-content");
+    
     // 수정
-    $(".summarizer-edit-entry").off("click").on("click", function() {
+    $container.on("click", ".summarizer-edit-entry", function() {
         const idx = $(this).data("idx");
         const $entry = $(`.summarizer-entry[data-msg-index="${idx}"]`);
         $entry.find(".summarizer-entry-content").hide();
@@ -1150,13 +1243,19 @@ function bindEntryEvents() {
     });
     
     // 저장
-    $(".summarizer-save-entry").off("click").on("click", async function() {
+    $container.on("click", ".summarizer-save-entry", async function() {
         const idx = $(this).data("idx");
         const $entry = $(`.summarizer-entry[data-msg-index="${idx}"]`);
-        const newContent = $entry.find(".summarizer-entry-textarea").val();
+        const editedText = $entry.find(".summarizer-entry-textarea").val();
+        
+        // 원본에서 숨겨진 JSON 블록 추출하여 재결합
+        const originalContent = getSummaryData().summaries[idx]?.content || '';
+        const hiddenBlocks = extractJsonBlocks(originalContent);
+        const newContent = hiddenBlocks ? editedText + '\n' + hiddenBlocks : editedText;
         
         setSummaryForMessage(idx, newContent);
         await saveSummaryData();
+        invalidateTokenCache();
         await injectSummaryToPrompt();
         
         showToast('success', `#${idx} 요약이 수정되었습니다.`);
@@ -1164,15 +1263,93 @@ function bindEntryEvents() {
     });
     
     // 취소
-    $(".summarizer-cancel-entry").off("click").on("click", function() {
+    $container.on("click", ".summarizer-cancel-entry", function() {
         const idx = $(this).data("idx");
         const $entry = $(`.summarizer-entry[data-msg-index="${idx}"]`);
         $entry.find(".summarizer-entry-content").show();
         $entry.find(".summarizer-entry-edit-area").hide();
     });
     
+    // 핀 고정/해제
+    $container.on("click", ".summarizer-pin-entry", async function() {
+        const idx = parseInt($(this).data("idx"));
+        const data = getSummaryData();
+        if (!data || !data.summaries[idx]) return;
+        
+        const summary = data.summaries[idx];
+        summary.pinned = !summary.pinned;
+        data.lastUpdate = new Date().toLocaleString("ko-KR");
+        
+        await saveSummaryData();
+        invalidateTokenCache();
+        await injectSummaryToPrompt();
+        
+        showToast('info', summary.pinned ? `#${idx} 핀 고정됨 (우선 포함)` : `#${idx} 핀 해제됨`);
+        await renderSummaryList();
+        updateStatusDisplay();
+    });
+    
+    // 메모 토글
+    $container.on("click", ".summarizer-memo-toggle", function() {
+        const idx = $(this).data("idx");
+        const $entry = $(`.summarizer-entry[data-msg-index="${idx}"]`);
+        const $memoArea = $entry.find(".summarizer-entry-memo-area");
+        if ($memoArea.is(":visible")) {
+            $memoArea.hide();
+        } else {
+            $memoArea.show();
+            $memoArea.find(".summarizer-memo-input").focus();
+        }
+    });
+    
+    // 메모 저장
+    $container.on("click", ".summarizer-save-memo", async function() {
+        const idx = parseInt($(this).data("idx"));
+        const $entry = $(`.summarizer-entry[data-msg-index="${idx}"]`);
+        const memoVal = $entry.find(".summarizer-memo-input").val().trim();
+        
+        const data = getSummaryData();
+        if (!data || !data.summaries[idx]) return;
+        
+        data.summaries[idx].memo = memoVal;
+        data.lastUpdate = new Date().toLocaleString("ko-KR");
+        
+        await saveSummaryData();
+        showToast('success', memoVal ? `#${idx} 메모 저장됨` : `#${idx} 메모 삭제됨`);
+        await renderSummaryList();
+    });
+    
+    // 메모 취소
+    $container.on("click", ".summarizer-cancel-memo", function() {
+        const idx = $(this).data("idx");
+        const $entry = $(`.summarizer-entry[data-msg-index="${idx}"]`);
+        $entry.find(".summarizer-entry-memo-area").hide();
+    });
+    
+    // 메모 삭제
+    $container.on("click", ".summarizer-delete-memo", async function() {
+        const idx = parseInt($(this).data("idx"));
+        const data = getSummaryData();
+        if (!data || !data.summaries[idx]) return;
+        
+        data.summaries[idx].memo = '';
+        data.lastUpdate = new Date().toLocaleString("ko-KR");
+        
+        await saveSummaryData();
+        showToast('info', `#${idx} 메모 삭제됨`);
+        await renderSummaryList();
+    });
+    
+    // 메모 입력 Enter 키 저장
+    $container.on("keydown", ".summarizer-memo-input", function(e) {
+        if (e.key === 'Enter') {
+            const idx = $(this).data("idx");
+            $(`.summarizer-save-memo[data-idx="${idx}"]`).click();
+        }
+    });
+    
     // 재생성
-    $(".summarizer-regenerate-entry").off("click").on("click", async function() {
+    $container.on("click", ".summarizer-regenerate-entry", async function() {
         const idx = parseInt($(this).data("idx"));
         const summaries = getRelevantSummaries();
         const currentSummary = summaries[idx]?.content || "";
@@ -1202,6 +1379,7 @@ function bindEntryEvents() {
                 ? `#${result.startIdx}-${result.endIdx} 그룹 요약이 재생성되었습니다.`
                 : `#${idx} 요약이 재생성되었습니다.`;
             showToast('success', successMsg);
+            invalidateTokenCache();
             await renderSummaryList();
         } else {
             showToast('error', result.error || '재생성 실패');
@@ -1209,13 +1387,14 @@ function bindEntryEvents() {
     });
     
     // 삭제
-    $(".summarizer-delete-entry").off("click").on("click", async function() {
+    $container.on("click", ".summarizer-delete-entry", async function() {
         const idx = $(this).data("idx");
         
         if (!confirm(`#${idx} 요약을 삭제하시겠습니까?`)) return;
         
         deleteSummaryForMessage(idx);
         await saveSummaryData();
+        invalidateTokenCache();
         await injectSummaryToPrompt();
         applyMessageVisibility();
         
@@ -1226,10 +1405,198 @@ function bindEntryEvents() {
 }
 
 /**
+ * 전체 요약에서 사용 중인 카테고리 라벨 목록 수집
+ * @returns {Map<string, number>} 라벨 → 등장 횟수
+ */
+function collectCategoryLabels() {
+    const summaries = getRelevantSummaries();
+    const labelCounts = new Map();
+    const categoryLinePattern = /^\*\s+(.+?):/;
+    
+    for (const index of Object.keys(summaries)) {
+        const summary = summaries[index];
+        const content = String(summary?.content ?? summary ?? '');
+        if (isGroupIncludedContent(content)) continue;
+        
+        const lines = content.split('\n');
+        for (const line of lines) {
+            const match = categoryLinePattern.exec(line.trim());
+            if (match) {
+                const label = match[1].trim();
+                labelCounts.set(label, (labelCounts.get(label) || 0) + 1);
+            }
+        }
+    }
+    
+    return labelCounts;
+}
+
+/**
+ * 항목 일괄 삭제 패널 열기
+ */
+function openBulkCategoryDelete() {
+    const labelCounts = collectCategoryLabels();
+    
+    if (labelCounts.size === 0) {
+        showToast('warning', '저장된 요약에 삭제 가능한 항목이 없습니다.');
+        return;
+    }
+    
+    let checkboxesHtml = '';
+    for (const [label, count] of labelCounts) {
+        checkboxesHtml += `
+            <label class="summarizer-bulk-delete-item">
+                <input type="checkbox" class="bulk-delete-checkbox" value="${escapeHtml(label)}" />
+                <span class="summarizer-bulk-delete-check"><i class="fa-solid fa-check"></i></span>
+                <span class="summarizer-bulk-delete-label">${escapeHtml(label)}</span>
+                <span class="summarizer-bulk-delete-count">${count}</span>
+            </label>`;
+    }
+    
+    const totalItems = labelCounts.size;
+    const panelHtml = `
+        <div class="summarizer-bulk-delete-panel">
+            <div class="summarizer-bulk-delete-header">
+                <div class="summarizer-bulk-delete-header-left">
+                    <span class="bulk-delete-icon"><i class="fa-solid fa-filter-circle-xmark"></i></span>
+                    <strong>항목 일괄 삭제</strong>
+                </div>
+                <div class="summarizer-bulk-delete-header-right">
+                    <button class="bulk-select-toggle" id="summarizer-bulk-select-all">전체 선택</button>
+                    <button class="bulk-select-toggle" id="summarizer-bulk-deselect-all">선택 해제</button>
+                </div>
+            </div>
+            <div class="summarizer-bulk-delete-body">
+                <small class="summarizer-bulk-delete-hint">삭제할 항목을 클릭하여 선택하세요 (총 ${totalItems}개)</small>
+                <div class="summarizer-bulk-delete-list">
+                    ${checkboxesHtml}
+                </div>
+            </div>
+            <div class="summarizer-bulk-delete-footer">
+                <span class="summarizer-bulk-delete-selected-info" id="summarizer-bulk-selected-count">선택된 항목 없음</span>
+                <div class="summarizer-bulk-delete-actions">
+                    <button id="summarizer-bulk-delete-cancel" class="summarizer-btn summarizer-btn-secondary summarizer-btn-small">
+                        취소
+                    </button>
+                    <button id="summarizer-bulk-delete-execute" class="summarizer-btn summarizer-btn-danger summarizer-btn-small" disabled>
+                        <i class="fa-solid fa-trash"></i> 삭제
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    
+    // 기존 패널 제거 후 삽입
+    $(".summarizer-bulk-delete-panel").remove();
+    $("#summarizer-preview-content").before(panelHtml);
+    
+    // 선택 카운트 업데이트 헬퍼
+    function updateSelectedCount() {
+        const count = $(".bulk-delete-checkbox:checked").length;
+        const infoEl = $("#summarizer-bulk-selected-count");
+        const execBtn = $("#summarizer-bulk-delete-execute");
+        if (count > 0) {
+            infoEl.text(`${count}개 선택됨`).addClass('has-selection');
+            execBtn.prop('disabled', false);
+        } else {
+            infoEl.text('선택된 항목 없음').removeClass('has-selection');
+            execBtn.prop('disabled', true);
+        }
+    }
+
+    // 이벤트 바인딩
+    $("#summarizer-bulk-delete-cancel").on("click", () => {
+        $(".summarizer-bulk-delete-panel").remove();
+    });
+    
+    $("#summarizer-bulk-delete-execute").on("click", executeBulkCategoryDelete);
+
+    // 전체 선택 / 해제
+    $("#summarizer-bulk-select-all").on("click", () => {
+        $(".bulk-delete-checkbox").prop('checked', true);
+        updateSelectedCount();
+    });
+    $("#summarizer-bulk-deselect-all").on("click", () => {
+        $(".bulk-delete-checkbox").prop('checked', false);
+        updateSelectedCount();
+    });
+
+    // 개별 체크박스 변경 시 카운트 업데이트
+    $(".bulk-delete-checkbox").on("change", updateSelectedCount);
+}
+
+/**
+ * 선택된 항목을 모든 요약에서 일괄 삭제 실행
+ */
+async function executeBulkCategoryDelete() {
+    const selectedLabels = [];
+    $(".bulk-delete-checkbox:checked").each(function() {
+        selectedLabels.push($(this).val());
+    });
+    
+    if (selectedLabels.length === 0) {
+        showToast('warning', '삭제할 항목을 선택하세요.');
+        return;
+    }
+    
+    const labelText = selectedLabels.join(', ');
+    if (!confirm(`선택한 항목 [${labelText}]을(를) 모든 요약에서 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.`)) return;
+    
+    const summaries = getRelevantSummaries();
+    let totalRemoved = 0;
+    let modifiedCount = 0;
+    let deletedCount = 0;
+    
+    for (const index of Object.keys(summaries)) {
+        const summary = summaries[index];
+        const content = String(summary?.content ?? summary ?? '');
+        if (isGroupIncludedContent(content)) continue;
+        
+        const lines = content.split('\n');
+        const filteredLines = [];
+        let removedInThis = 0;
+        
+        for (const line of lines) {
+            const match = /^\*\s+(.+?):/.exec(line.trim());
+            if (match && selectedLabels.includes(match[1].trim())) {
+                removedInThis++;
+                totalRemoved++;
+            } else {
+                filteredLines.push(line);
+            }
+        }
+        
+        if (removedInThis > 0) {
+            const newContent = filteredLines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+            // 헤더만 남거나 비어있으면 전체 삭제
+            if (!newContent || newContent.replace(/^#\d+(-\d+)?\s*$/m, '').trim() === '') {
+                deleteSummaryForMessage(parseInt(index));
+                deletedCount++;
+            } else {
+                setSummaryForMessage(parseInt(index), newContent);
+            }
+            modifiedCount++;
+        }
+    }
+    
+    await saveSummaryData();
+    await injectSummaryToPrompt();
+    
+    $(".summarizer-bulk-delete-panel").remove();
+    
+    showToast('success', `[${labelText}] 항목이 ${modifiedCount}개 요약에서 삭제되었습니다. (총 ${totalRemoved}줄 제거${deletedCount > 0 ? `, ${deletedCount}개 요약 전체 삭제` : ''})`);
+    await renderSummaryList();
+    updateStatusDisplay();
+}
+
+/**
  * 미리보기 닫기
  */
 export function closePreview() {
     $("#summarizer-preview").hide();
+    // 필터 초기화
+    summaryFilterMode = 'all';
+    $("#summarizer-filter-pinned-memo").removeClass('active')
+        .attr('title', '📌 핀 고정만 모아보기');
 }
 
 // ===== 검색 =====
@@ -1391,6 +1758,314 @@ export function openImportModal() {
 export function closeImportModal() {
     $("#summarizer-import-modal").hide();
     importModalFileContent = null;
+}
+
+// ===== 압축 요약 모달 =====
+
+// 압축 미리보기 데이터 임시 저장
+let compressPreviewData = null;
+
+/**
+ * 유효한 요약 키 목록 가져오기 (그룹 참조, 파싱 실패 제외)
+ * @param {Object} summaries - 전체 요약 객체
+ * @returns {number[]} 정렬된 유효 키 목록
+ */
+function getValidSummaryKeys(summaries) {
+    return Object.keys(summaries)
+        .map(k => parseInt(k))
+        .filter(k => {
+            if (isNaN(k)) return false;
+            const s = summaries[k];
+            const content = typeof s === 'string' ? s : (s?.content || '');
+            if (!content) return false;
+            if (isGroupIncludedContent(content)) return false;
+            if (isParsingFailedContent(content)) return false;
+            return true;
+        })
+        .sort((a, b) => a - b);
+}
+
+/**
+ * 라디오 범위 선택 리스너 설정
+ * @param {string} prefix - 'compress'
+ */
+function setupRangeRadioListeners(prefix) {
+    $(`input[name="${prefix}-range"]`).off('change').on('change', function() {
+        const val = $(this).val();
+        $(`#summarizer-${prefix}-recent-count, #summarizer-${prefix}-old-count`).prop('disabled', true);
+        if (val === 'recent') {
+            $(`#summarizer-${prefix}-recent-count`).prop('disabled', false).focus();
+        } else if (val === 'old') {
+            $(`#summarizer-${prefix}-old-count`).prop('disabled', false).focus();
+        }
+    });
+}
+
+/**
+ * 라디오 선택에 따라 타겟 키 목록 계산
+ * @param {string} prefix - 'compress'
+ * @param {number[]} validKeys - 전체 유효 키 목록
+ * @returns {number[]} 선택된 범위의 키 목록
+ */
+function getTargetKeysFromRadio(prefix, validKeys) {
+    const rangeType = $(`input[name="${prefix}-range"]:checked`).val() || 'all';
+    
+    if (rangeType === 'recent') {
+        const count = parseInt($(`#summarizer-${prefix}-recent-count`).val()) || 20;
+        return validKeys.slice(-count);
+    } else if (rangeType === 'old') {
+        const count = parseInt($(`#summarizer-${prefix}-old-count`).val()) || 20;
+        return validKeys.slice(0, count);
+    }
+    return [...validKeys]; // 전체
+}
+
+/**
+ * 압축 요약 모달 열기
+ */
+function openCompressModal() {
+    // 완료된 미적용 결과가 있으면 그대로 표시
+    if (compressPreviewData) {
+        $("#summarizer-compress-modal").css('display', 'flex');
+        return;
+    }
+    
+    const summaryData = getSummaryData();
+    const summaries = summaryData?.summaries || {};
+    
+    // 유효한 요약 키 (그룹 참조, 파싱 실패 제외)
+    const validKeys = getValidSummaryKeys(summaries);
+    const compressableCount = validKeys.length;
+    
+    // 총 개수 표시
+    $("#summarizer-compress-total-count").text(compressableCount);
+    
+    // 라디오 초기화
+    $('input[name="compress-range"][value="all"]').prop('checked', true);
+    $("#summarizer-compress-recent-count, #summarizer-compress-old-count").prop('disabled', true);
+    setupRangeRadioListeners('compress');
+    
+    // 미리보기/진행률 초기화
+    $("#summarizer-compress-progress").hide();
+    $("#summarizer-compress-preview-area").empty();
+    $("#summarizer-compress-apply").prop('disabled', true);
+    compressPreviewData = null;
+    
+    $("#summarizer-compress-modal").css('display', 'flex');
+}
+
+/**
+ * 압축 요약 모달 닫기
+ */
+function closeCompressModal() {
+    // 닫기 = 항상 취소 + 데이터 폐기
+    if (getCompressState().isRunning) {
+        cancelCompress();
+    }
+    compressPreviewData = null;
+    $("#summarizer-compress-modal").hide();
+}
+
+/**
+ * 압축 실행 (배치 단위 + 진행률 + 취소 지원)
+ */
+async function executeCompressSummaries() {
+    // 이미 실행 중이면 무시
+    if (getCompressState().isRunning) {
+        showToast('warning', '이미 압축이 진행 중입니다.');
+        return;
+    }
+    
+    const summaryData = getSummaryData();
+    const summaries = summaryData?.summaries || {};
+    
+    // 유효한 요약 키
+    const validKeys = getValidSummaryKeys(summaries);
+    const targetKeys = getTargetKeysFromRadio('compress', validKeys);
+    
+    if (targetKeys.length === 0) {
+        showToast('error', '압축할 요약이 없습니다.');
+        return;
+    }
+    
+    // UI 상태 변경
+    $("#summarizer-compress-execute").prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> 압축 중...');
+    $("#summarizer-compress-apply").prop('disabled', true);
+    
+    // 진행률 표시
+    $("#summarizer-compress-progress").show();
+    $("#summarizer-compress-progress-fill").css('width', '0%');
+    $("#summarizer-compress-progress-text").text('준비 중...');
+    $("#summarizer-compress-preview-area").empty();
+    
+    try {
+        const result = await compressSummaries(targetKeys, [], (current, total, status) => {
+            // 진행률 콜백
+            const pct = Math.round((current / total) * 100);
+            $("#summarizer-compress-progress-fill").css('width', `${pct}%`);
+            $("#summarizer-compress-progress-text").text(`${current}/${total} (${pct}%) - ${status}`);
+        });
+        
+        // 진행률 숨기기
+        $("#summarizer-compress-progress").hide();
+        
+        if (result.cancelled) {
+            showToast('warning', '압축이 취소되었습니다.');
+            $("#summarizer-compress-preview-area").html('<div class="summarizer-preview-placeholder">압축이 취소되었습니다. 다시 실행하려면 압축 실행을 클릭하세요.</div>');
+            return;
+        }
+        
+        if (!result.success) {
+            showToast('error', result.error || '압축 실패');
+            $("#summarizer-compress-preview-area").html(`<div class="summarizer-preview-error">오류: ${escapeHtml(result.error || '압축 실패')}</div>`);
+            return;
+        }
+        
+        // 미리보기 생성
+        compressPreviewData = result;
+        await renderCompressPreview(result);
+        
+    } catch (error) {
+        logError('executeCompressSummaries', error);
+        showToast('error', '압축 중 오류 발생');
+        $("#summarizer-compress-progress").hide();
+        $("#summarizer-compress-preview-area").html(`<div class="summarizer-preview-error">오류: ${escapeHtml(error.message)}</div>`);
+    } finally {
+        $("#summarizer-compress-execute").prop('disabled', false).html('<i class="fa-solid fa-compress"></i> 압축 실행');
+        $("#summarizer-compress-cancel-run").prop('disabled', false).html('<i class="fa-solid fa-stop"></i> 중단');
+    }
+}
+
+/**
+ * 압축 미리보기 렌더링
+ */
+async function renderCompressPreview(result) {
+    const compressedCount = Object.keys(result.compressedSummaries).length;
+    const originalCount = Object.keys(result.originalSummaries).length;
+    
+    // 토큰 절약량 계산
+    let originalTokens = 0;
+    let compressedTokens = 0;
+    const tokenCounter = getTokenCountAsync;
+    
+    for (const [key, original] of Object.entries(result.originalSummaries)) {
+        const compressed = result.compressedSummaries[key];
+        if (!compressed) continue;
+        
+        if (tokenCounter) {
+            originalTokens += await tokenCounter(original);
+            compressedTokens += await tokenCounter(compressed);
+        } else {
+            // 폴백: 글자 수 / 4 추정
+            originalTokens += Math.ceil(original.length / 4);
+            compressedTokens += Math.ceil(compressed.length / 4);
+        }
+    }
+    
+    const savedTokens = originalTokens - compressedTokens;
+    const savedPercent = originalTokens > 0 ? Math.round((savedTokens / originalTokens) * 100) : 0;
+    
+    let previewHtml = '<div class="summarizer-compress-comparison">';
+    
+    // 토큰 절약 통계
+    const tokenStatsHtml = originalTokens > 0 
+        ? `<div class="summarizer-compress-token-stats">
+            <span class="summarizer-token-stat"><i class="fa-solid fa-file-lines"></i> 원본: ${originalTokens.toLocaleString()} 토큰</span>
+            <span class="summarizer-token-stat"><i class="fa-solid fa-compress"></i> 압축: ${compressedTokens.toLocaleString()} 토큰</span>
+            <span class="summarizer-token-stat summarizer-token-saved"><i class="fa-solid fa-arrow-down"></i> 절약: ${savedTokens.toLocaleString()} 토큰 (${savedPercent}%)</span>
+        </div>`
+        : '';
+    
+    previewHtml += `<div class="summarizer-compress-stats-bar">
+        <span class="summarizer-compress-stats-count"><i class="fa-solid fa-check"></i> 압축 완료: ${compressedCount}/${originalCount}개 요약</span>
+    </div>${tokenStatsHtml}`;
+    
+    // 각 요약 비교 표시 (상/하 레이아웃)
+    for (const [key, compressed] of Object.entries(result.compressedSummaries)) {
+        const original = result.originalSummaries[key] || '';
+        
+        // 그룹 요약인지 확인하여 표시 번호 결정
+        const rangeMatch = original.match(/^#(\d+)-(\d+)/);
+        const compressedRangeMatch = compressed.match(/^#(\d+)-(\d+)/);
+        let displayNum;
+        if (rangeMatch) {
+            displayNum = `#${rangeMatch[1]}~${rangeMatch[2]}`;
+        } else if (compressedRangeMatch) {
+            displayNum = `#${compressedRangeMatch[1]}~${compressedRangeMatch[2]}`;
+        } else {
+            displayNum = `#${key}`;
+        }
+        
+        // 원본에서 #X-Y 헤더 제거하여 본문만 표시
+        const originalBody = original.replace(/^#\d+(?:-\d+)?\s*\n?/, '').trim();
+        const compressedBody = compressed.replace(/^#\d+(?:-\d+)?\s*\n?/, '').trim();
+        
+        previewHtml += `
+            <div class="summarizer-compress-item">
+                <div class="summarizer-compress-header">${displayNum}</div>
+                <div class="summarizer-compress-pair">
+                    <div class="summarizer-compress-original">
+                        <span class="summarizer-compress-tag">원본</span>
+                        <div class="summarizer-compress-content">${escapeHtml(originalBody)}</div>
+                    </div>
+                    <div class="summarizer-compress-result">
+                        <span class="summarizer-compress-tag">압축</span>
+                        <div class="summarizer-compress-content">${escapeHtml(compressedBody)}</div>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+    
+    previewHtml += '</div>';
+    $("#summarizer-compress-preview-area").html(previewHtml);
+    $("#summarizer-compress-apply").prop('disabled', false);
+    
+    showToast('success', `${compressedCount}개 요약 압축 완료 - 미리보기를 확인하세요`);
+}
+
+/**
+ * 압축 결과 적용
+ */
+async function applyCompressResult() {
+    if (!compressPreviewData || !compressPreviewData.compressedSummaries) {
+        showToast('error', '적용할 압축 결과가 없습니다.');
+        return;
+    }
+    
+    // 자동 백업 (가져오기 호환 형식)
+    try {
+        const summaryData = getSummaryData();
+        const charName = getCharacterName();
+        const backupData = {
+            exportDate: new Date().toISOString(),
+            characterName: charName,
+            chatId: getCurrentChatId(),
+            data: summaryData
+        };
+        const backupJson = JSON.stringify(backupData, null, 2);
+        const blob = new Blob([backupJson], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `summary-backup-before-compress-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) {
+        log(`[압축] 백업 다운로드 실패: ${e.message}`);
+    }
+    
+    // 적용
+    const success = await applyCompressedSummaries(compressPreviewData.compressedSummaries);
+    
+    if (success) {
+        showToast('success', '압축된 요약이 적용되었습니다.');
+        closeCompressModal();
+        currentPage = 0;
+        renderSummaryList();
+    } else {
+        showToast('error', '적용 중 오류가 발생했습니다.');
+    }
 }
 
 /**
@@ -1627,12 +2302,15 @@ async function renderLegacySummaryListInPreview() {
             displayContent = displayContent.replace(/^#\d+(-\d+)?\s*\n/, '');
         }
         displayContent = cleanJsonBlocks(displayContent);
+        displayContent = cleanCatalogSections(displayContent);
         
         // 수정용 텍스트 (헤더 제거된 실제 AI 주입 내용만)
         let editContent = content;
         if (/^#\d+(-\d+)?\s*\n/.test(editContent)) {
             editContent = editContent.replace(/^#\d+(-\d+)?\s*\n/, '');
         }
+        editContent = cleanJsonBlocks(editContent);
+        editContent = cleanCatalogSections(editContent);
         
         // 고정 번호 (오래된 순서 기준, 정렬 순서와 무관하게 항상 동일)
         const displayNumber = `#${orderToNumber.get(summary.order)}`;
@@ -1709,7 +2387,16 @@ function bindLegacyPreviewEntryEvents() {
     $(".summarizer-legacy-preview-save").off("click").on("click", async function() {
         const order = $(this).data("order");
         const $entry = $(`.summarizer-legacy-entry-preview[data-order="${order}"]`);
-        const newContent = $entry.find(".summarizer-entry-textarea").val();
+        const editedText = $entry.find(".summarizer-entry-textarea").val();
+        
+        // 원본에서 숨겨진 블록 추출하여 재결합
+        const original = getLegacySummaries().find(s => s.order === order);
+        const originalContent = original?.content || '';
+        const hiddenJson = extractJsonBlocks(originalContent);
+        const hiddenCatalog = extractCatalogSections(originalContent);
+        let newContent = editedText;
+        if (hiddenJson) newContent += '\n' + hiddenJson;
+        if (hiddenCatalog) newContent += '\n' + hiddenCatalog;
         
         updateLegacySummary(order, newContent);
         await saveSummaryData();
@@ -1810,12 +2497,15 @@ export async function renderLegacySummaryList() {
             displayContent = displayContent.replace(/^#\d+(-\d+)?\s*\n/, '');
         }
         displayContent = cleanJsonBlocks(displayContent);
+        displayContent = cleanCatalogSections(displayContent);
         
         // 수정용 텍스트 (헤더 제거된 실제 AI 주입 내용만)
         let editContent = content;
         if (/^#\d+(-\d+)?\s*\n/.test(editContent)) {
             editContent = editContent.replace(/^#\d+(-\d+)?\s*\n/, '');
         }
+        editContent = cleanJsonBlocks(editContent);
+        editContent = cleanCatalogSections(editContent);
         
         // 고정 번호 (오래된 순서 기준, 정렬 순서와 무관하게 항상 동일)
         const displayNumber = `#${orderToNumber.get(summary.order)}`;
@@ -1874,7 +2564,16 @@ function bindLegacyEntryEvents() {
     $(".summarizer-legacy-save").off("click").on("click", async function() {
         const order = $(this).data("order");
         const $entry = $(`.summarizer-legacy-entry[data-order="${order}"]`);
-        const newContent = $entry.find(".summarizer-legacy-entry-textarea").val();
+        const editedText = $entry.find(".summarizer-legacy-entry-textarea").val();
+        
+        // 원본에서 숨겨진 블록 추출하여 재결합
+        const original = getLegacySummaries().find(s => s.order === order);
+        const originalContent = original?.content || '';
+        const hiddenJson = extractJsonBlocks(originalContent);
+        const hiddenCatalog = extractCatalogSections(originalContent);
+        let newContent = editedText;
+        if (hiddenJson) newContent += '\n' + hiddenJson;
+        if (hiddenCatalog) newContent += '\n' + hiddenCatalog;
         
         updateLegacySummary(order, newContent);
         await saveSummaryData();
@@ -3195,7 +3894,7 @@ export function saveApiSettings() {
     settings.customApiUrl = $("#summarizer-custom-url").val().trim();
     settings.customApiKey = $("#summarizer-custom-key").val();
     settings.customApiModel = $("#summarizer-custom-model").val();
-    settings.customApiMaxTokens = parseInt($("#summarizer-custom-max-tokens").val()) || 4000;
+    settings.customApiMaxTokens = parseInt($("#summarizer-custom-max-tokens").val()) || 5000;
     settings.customApiTimeout = parseInt($("#summarizer-custom-timeout").val()) || 60;
     
     saveSettings();
@@ -3210,6 +3909,9 @@ export function saveApiSettings() {
  */
 export function bindUIEvents() {
     const settings = getSettings();
+    
+    // 요약 항목 이벤트 위임 (1회만 바인딩)
+    bindEntryEventsDelegated();
     
     // 팝업 닫기
     $("#summarizer-close-btn").on("click", closePopup);
@@ -3454,6 +4156,8 @@ export function bindUIEvents() {
     $("#summarizer-view-current").on("click", viewSummaries);
     $("#summarizer-view-legacy").on("click", viewLegacySummaries);
     $("#summarizer-preview-close").on("click", closePreview);
+    $("#summarizer-bulk-category-delete").on("click", openBulkCategoryDelete);
+    $("#summarizer-filter-pinned-memo").on("click", togglePinnedMemoFilter);
     $("#summarizer-restore-visibility").on("click", doRestoreVisibility);
     $("#summarizer-selective-reset").on("click", doSelectiveReset);
     
@@ -3508,6 +4212,18 @@ export function bindUIEvents() {
     $("#summarizer-import-file-input").on("change", handleImportFileSelect);
     $("#summarizer-import-confirm").on("click", doImportFromModal);
     
+    // 압축 요약 모달
+    $("#summarizer-compress-summaries").on("click", openCompressModal);
+    $("#summarizer-compress-modal-close").on("click", closeCompressModal);
+    $("#summarizer-compress-modal .summarizer-modal-overlay").on("click", closeCompressModal);
+    $("#summarizer-compress-execute").on("click", executeCompressSummaries);
+    $("#summarizer-compress-apply").on("click", applyCompressResult);
+    $("#summarizer-compress-cancel-run").on("click", function() {
+        cancelCompress();
+        $(this).prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> 중단 중...');
+        $("#summarizer-compress-progress-text").text('중단 요청됨... 현재 처리 완료 후 중단됩니다.');
+    });
+    
     // 프롬프트 탭 - 개별 요약
     $("#summarizer-save-prompt").on("click", savePromptTemplate);
     $("#summarizer-reset-prompt").on("click", resetPromptTemplate);
@@ -3544,7 +4260,7 @@ export function bindUIEvents() {
     
     // 클립보드 복사
     $("#summarizer-copy-to-clipboard").on("click", async function() {
-        const preview = await getInjectionPreview();
+        const { text: preview } = await getInjectionPreview({ ignoreBudget: true });
         try {
             // 기본 Clipboard API 시도
             if (navigator.clipboard && navigator.clipboard.writeText) {

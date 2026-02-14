@@ -2,8 +2,7 @@
  * 시나리오 자동요약 - 메시지 가시성 관리
  */
 
-import { getContext, extension_settings } from "../../../../extensions.js";
-import { extensionName } from './constants.js';
+import { getContext } from "../../../../extensions.js";
 import { log, getSettings } from './state.js';
 import { getSummaryData, getRelevantSummaries } from './storage.js';
 

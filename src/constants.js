@@ -629,3 +629,179 @@ export function getEventJsonCleanupPattern() {
 export function getItemJsonCleanupPattern() {
     return /\[ITEMS(?:_JSON)?\]\s*[\s\S]*?\s*\[\/.{0,5}ITEMS(?:_JSON)?\]/gi;
 }
+
+// ===== 상태 마커 상수 (문자열 하드코딩 방지) =====
+
+/** 그룹 요약에 포함된 개별 요약의 마커 접두어 */
+export const GROUP_INCLUDED_PREFIX = '[→';
+
+/** 그룹 요약에 포함되었음을 나타내는 텍스트 */
+export const GROUP_INCLUDED_TEXT = '그룹 요약에 포함';
+
+/** 파싱 실패 마커 텍스트 */
+export const PARSING_FAILED_TEXT = '파싱 실패';
+
+/** 파싱 실패 전체 마커 */
+export const PARSING_FAILED_MARKER = '[❌ 요약 파싱 실패 - 재요약 필요]';
+
+/**
+ * 그룹 요약 참조 마커 생성
+ * @param {number} startNum - 그룹 시작 번호
+ * @param {number} endNum - 그룹 끝 번호
+ * @returns {string}
+ */
+export function makeGroupIncludedMarker(startNum, endNum) {
+    return `[→ #${startNum}-${endNum} 그룹 요약에 포함]`;
+}
+
+/**
+ * 요약 내용이 그룹에 포함된 참조 마커인지 확인
+ * @param {string} content - 요약 내용
+ * @returns {boolean}
+ */
+export function isGroupIncludedContent(content) {
+    return content.startsWith(GROUP_INCLUDED_PREFIX) || content.includes(GROUP_INCLUDED_TEXT);
+}
+
+/**
+ * 요약 내용이 파싱 실패 마커인지 확인
+ * @param {string} content - 요약 내용
+ * @returns {boolean}
+ */
+export function isParsingFailedContent(content) {
+    return content.includes(PARSING_FAILED_TEXT) || content.includes('❌');
+}
+
+/**
+ * 요약 콘텐츠에서 모든 JSON 블록 제거 (CHARACTERS, EVENTS, ITEMS)
+ * @param {string} content - 요약 콘텐츠
+ * @returns {string} - 정리된 콘텐츠
+ */
+export function cleanJsonBlocks(content) {
+    if (!content) return content;
+    let cleaned = content;
+    cleaned = cleaned.replace(getCharacterJsonCleanupPattern(), '');
+    cleaned = cleaned.replace(getEventJsonCleanupPattern(), '');
+    cleaned = cleaned.replace(getItemJsonCleanupPattern(), '');
+    return cleaned.trim();
+}
+
+/**
+ * 요약 텍스트에서 도감 섹션(--- CHARACTERS/EVENTS/ITEMS ---) 제거
+ * @param {string} content - 요약 콘텐츠
+ * @returns {string} - 도감 섹션이 제거된 콘텐츠
+ */
+export function cleanCatalogSections(content) {
+    if (!content) return content;
+    // --- CHARACTERS --- / --- EVENTS --- / --- ITEMS --- 섹션 제거 (항상 텍스트 끝부분에 위치)
+    return content.replace(/\n*--- (?:CHARACTERS|EVENTS|ITEMS) ---[\s\S]*$/, '').trim();
+}
+
+/**
+ * 요약 콘텐츠에서 JSON 블록([CHARACTERS_JSON] 등)을 추출하여 반환
+ * cleanJsonBlocks가 제거하는 블록들을 추출합니다. 수정 시 원본 보존용.
+ * @param {string} content - 요약 콘텐츠
+ * @returns {string} - 추출된 JSON 블록 문자열 (없으면 빈 문자열)
+ */
+export function extractJsonBlocks(content) {
+    if (!content) return '';
+    const blocks = [];
+    const patterns = [getCharacterJsonCleanupPattern(), getEventJsonCleanupPattern(), getItemJsonCleanupPattern()];
+    for (const pattern of patterns) {
+        const matches = content.match(pattern);
+        if (matches) blocks.push(...matches);
+    }
+    return blocks.join('\n');
+}
+
+/**
+ * 요약 콘텐츠에서 도감 섹션(--- CHARACTERS/EVENTS/ITEMS ---)을 추출하여 반환
+ * cleanCatalogSections가 제거하는 부분을 추출합니다. 수정 시 원본 보존용.
+ * @param {string} content - 요약 콘텐츠
+ * @returns {string} - 추출된 도감 섹션 문자열 (없으면 빈 문자열)
+ */
+export function extractCatalogSections(content) {
+    if (!content) return '';
+    const match = content.match(/\n*--- (?:CHARACTERS|EVENTS|ITEMS) ---[\s\S]*$/);
+    return match ? match[0].trim() : '';
+}
+
+// ===== 압축 요약 프롬프트 템플릿 =====
+
+export const DEFAULT_COMPRESS_PROMPT_TEMPLATE = `You are an expert at compressing roleplay summaries while preserving essential story elements.
+Your goal is MODERATE compression (roughly 60-80% of original length), NOT aggressive summarization.
+
+## Your Task
+Tighten the wording of each summary while keeping all important story beats intact.
+Aim to reduce each summary by about 20-40% — do NOT cut more than half.
+If a summary is already short (1-3 lines), keep it as-is or make only minimal changes.
+
+## ⚠️ HOW to Compress (Read This First)
+Primary method: TRIM WORDS WITHIN each sentence — cut filler words, redundant modifiers, verbose phrasing.
+Secondary method: DELETE entire sentences that are purely mundane with zero story impact.
+
+Decide what to delete based on CONTENT, not on counting sentences:
+- Read each sentence and ask: "Does this contain dialogue, emotion, character dynamics, or plot progression?"
+- If YES → Keep it (trim wording if verbose)
+- If NO → It is a candidate for deletion
+- The compressed version must cover ALL important story beats from the original
+- After compression, the result should be roughly 60-80% of the original length
+
+### Sentences You CAN Delete Entirely:
+- Pure movement/transition with no dialogue or emotion ("walked to the door and sat down")
+- Repetitive descriptions that restate what was already said
+- Generic atmosphere filler that adds nothing to character or plot
+- Preparation actions with no character dynamics ("got dressed and left the house")
+
+### Sentences You Must NEVER Delete:
+- Any sentence containing dialogue (quoted speech)
+- Any sentence showing character emotion, reaction, or internal thought
+- Any sentence with relationship dynamics or tension
+- Any sentence that explains WHY something happened (cause-and-effect)
+- Any sentence introducing new information, decisions, or turning points
+
+❌ WRONG: Deleting a sentence that contains both mundane action AND character dynamics
+✅ RIGHT: Trimming the mundane part, keeping the character dynamics part
+
+## 🔴 MUST PRESERVE (Never Remove)
+- ALL direct dialogue in quotes — keep original wording exactly as written, do not paraphrase
+- Character relationship changes (confessions, conflicts, reconciliation, misunderstandings)
+- Each character's emotional reactions and internal thoughts
+- Story turning points (new character introductions, important decisions, secrets revealed)
+- Character-specific behaviors, habits, and personality-revealing actions
+- Foreshadowing elements or seemingly minor details that could become important later
+- Key actions that move the plot forward
+- Cause-and-effect context — keep WHY something happened, not just WHAT happened
+- The exact \`* Category: content\` format structure — every category label must remain
+
+## 🟡 CAN BE SHORTENED (Trim Wording)
+- Verbose scene-setting → trim excess adjectives, keep core atmosphere in fewer words
+- Step-by-step action sequences → tighten wording, keep the meaningful actions
+- Movement/transition descriptions → shorten the journey, keep destination
+- Repetitive phrasings → merge truly redundant phrases into one concise expression
+- Category item values with excessive detail:
+  * Location: Remove intermediate routes, keep key locations (e.g. "건물 앞 인도 → 엘리베이터 → 복도 → 집 앞 → 집 내부" → "건물 앞 → 집 내부")
+  * Time/Date: Keep the essential time marker, remove redundant context
+  * Scenario: Tighten verbose descriptions, merge related actions into one sentence
+  * Status/Emotion: Merge overlapping emotional words into one concise phrase
+
+## 🟢 CAN BE REMOVED (Entire Sentences)
+- Sentences describing ONLY mundane physical actions with no character interaction, emotion, or plot relevance
+- Information already stated in previous summaries (true duplicates only)
+- Pure transition filler ("then", "meanwhile", "after that" as standalone connectors)
+- BUT: if a sentence mixes mundane action with character dynamics, TRIM it instead of deleting
+
+## 📝 Output Format
+- Keep the EXACT same format as input: #MessageNumber followed by * Category: content
+- Maintain ALL original category labels (* Scenario, * Location, * Date, * Time, etc.)
+- Preserve the message number headers exactly (#0, #1-5, etc.)
+- Do NOT merge multiple summaries into one
+- Do NOT add, rename, or remove any category labels
+
+## ⚠️ Important
+- NEVER invent, guess, or add information that was not in the original text
+- Do NOT change the meaning of events
+- Do NOT paraphrase dialogue — keep quotes verbatim
+- Do NOT translate — keep everything in original language
+- When in doubt, keep the detail rather than removing it`;
+
