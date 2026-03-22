@@ -328,6 +328,15 @@
                         </label>
                         
                         <label class="summarizer-radio-item">
+                            <input type="radio" name="api-source" value="backend" />
+                            <span class="summarizer-radio-mark"></span>
+                            <div class="summarizer-radio-content">
+                                <strong>SillyTavern 백엔드 직접 호출</strong>
+                                <small>ST에 등록된 API 키로 프로바이더를 직접 지정합니다</small>
+                            </div>
+                        </label>
+                        
+                        <label class="summarizer-radio-item">
                             <input type="radio" name="api-source" value="custom" />
                             <span class="summarizer-radio-mark"></span>
                             <div class="summarizer-radio-content">
@@ -335,6 +344,36 @@
                                 <small>별도의 API 엔드포인트를 직접 설정합니다</small>
                             </div>
                         </label>
+                    </div>
+                </div>
+                
+                <!-- SillyTavern 백엔드 직접 호출 옵션 -->
+                <div class="summarizer-section" id="backend-api-options" style="display: none;">
+                    <h4><i class="fa-solid fa-server"></i> 백엔드 직접 호출 설정</h4>
+                    <small class="summarizer-hint" style="display:block; margin-bottom:8px;">SillyTavern에 이미 등록된 API 키를 사용합니다. 별도 키 입력이 필요 없습니다.</small>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-backend-provider">프로바이더</label>
+                        <select id="summarizer-backend-provider">
+                            <option value="openai">OpenAI</option>
+                            <option value="claude">Claude</option>
+                            <option value="google" selected>Google AI Studio</option>
+                            <option value="vertexai">Vertex AI</option>
+                            <option value="openrouter">OpenRouter</option>
+                            <option value="deepseek">DeepSeek</option>
+                        </select>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-backend-model">모델명</label>
+                        <input type="text" id="summarizer-backend-model" placeholder="예: gemini-3.1-pro-preview, gemini-3.1-flash-lite-preview, deepseek-chat" />
+                        <small class="summarizer-hint">사용할 모델의 정확한 이름을 입력하세요</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-backend-max-tokens">Max Tokens</label>
+                        <input type="number" id="summarizer-backend-max-tokens" min="500" max="100000" step="500" value="4000" />
+                        <small class="summarizer-hint">API 응답 최대 토큰 수 (기본: 4000)</small>
                     </div>
                 </div>
                 

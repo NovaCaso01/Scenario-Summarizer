@@ -3,9 +3,26 @@
  */
 
 import { extension_settings } from "../../../../extensions.js";
-import { main_api, generateQuietPrompt, generateRaw } from "../../../../../script.js";
-import { extensionName, API_SOURCE } from './constants.js';
+import { main_api, generateQuietPrompt, generateRaw, getRequestHeaders } from "../../../../../script.js";
+import { extensionName, API_SOURCE, BACKEND_PROVIDERS } from './constants.js';
 import { log, getSettings, logError } from './state.js';
+
+// secret_state / SECRET_KEYS (로드 시도, 없으면 null)
+let secret_state = null;
+let SECRET_KEYS = null;
+
+async function loadSecrets() {
+    if (secret_state && SECRET_KEYS) return true;
+    try {
+        const secrets = await import("../../../secrets.js");
+        secret_state = secrets.secret_state;
+        SECRET_KEYS = secrets.SECRET_KEYS;
+        return true;
+    } catch (error) {
+        log(`secrets.js not available: ${error.message}`);
+        return false;
+    }
+}
 
 // ConnectionManagerRequestService (SillyTavern 1.13.0+)
 let ConnectionManagerRequestService = null;
@@ -61,6 +78,8 @@ export async function callSummaryAPI(prompt) {
     
     if (settings.apiSource === API_SOURCE.CUSTOM) {
         return await callCustomAPI(fullPrompt);
+    } else if (settings.apiSource === API_SOURCE.BACKEND) {
+        return await callBackendAPI(fullPrompt);
     } else {
         // SillyTavern API - Connection Profile 사용 가능 여부 확인
         if (settings.stConnectionProfile) {
@@ -129,6 +148,115 @@ async function callConnectionManagerAPI(prompt) {
         return content;
     } catch (error) {
         log(`ConnectionManager API error: ${error.message}`);
+        throw error;
+    }
+}
+
+/**
+ * SillyTavern 백엔드 직접 호출 (llm-translator 방식)
+ * 인터셉트 확장에 영향을 받지 않음
+ * @param {string} prompt 
+ * @returns {Promise<string>}
+ */
+async function callBackendAPI(prompt) {
+    const settings = getSettings();
+    const provider = settings.backendProvider || 'google';
+    const model = settings.backendModel;
+    const maxTokens = settings.backendMaxTokens || 4000;
+    
+    if (!model) {
+        throw new Error('백엔드 API 모델이 설정되지 않았습니다');
+    }
+    
+    const providerInfo = BACKEND_PROVIDERS[provider];
+    if (!providerInfo) {
+        throw new Error(`지원되지 않는 프로바이더: ${provider}`);
+    }
+    
+    // API 키 확인 (선택적 - 없어도 시도는 함)
+    const hasSecrets = await loadSecrets();
+    if (hasSecrets && SECRET_KEYS) {
+        const keyName = providerInfo.secretKey;
+        // Vertex AI는 두 가지 키 확인
+        let hasKey = false;
+        if (provider === 'vertexai') {
+            hasKey = secret_state[SECRET_KEYS.VERTEXAI] || secret_state[SECRET_KEYS.VERTEXAI_SERVICE_ACCOUNT];
+        } else if (SECRET_KEYS[keyName]) {
+            hasKey = secret_state[SECRET_KEYS[keyName]];
+        }
+        
+        if (!hasKey) {
+            log(`Warning: ${providerInfo.name} API key may not be set in SillyTavern`);
+        }
+    }
+    
+    const messages = [
+        {
+            role: 'system',
+            content: 'You are a helpful assistant that summarizes roleplay scenarios. Respond in the requested format only.'
+        },
+        { role: 'user', content: prompt }
+    ];
+    
+    const requestBody = {
+        model: model,
+        messages: messages,
+        temperature: 0.3,
+        stream: false,
+        chat_completion_source: providerInfo.source,
+        max_tokens: maxTokens
+    };
+    
+    // Vertex AI 추가 파라미터
+    if (provider === 'vertexai') {
+        requestBody.vertexai_auth_mode = 'full';
+    }
+    
+    log(`Using Backend API: ${providerInfo.name} / ${model} (maxTokens: ${maxTokens})`);
+    
+    try {
+        const response = await fetch('/api/backends/chat-completions/generate', {
+            method: 'POST',
+            headers: { ...getRequestHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (!response.ok) {
+            let errorMessage = `HTTP ${response.status}`;
+            try {
+                const errorData = await response.json();
+                errorMessage = errorData?.error?.message || errorData?.message || response.statusText || errorMessage;
+            } catch (e) {
+                errorMessage = response.statusText || errorMessage;
+            }
+            throw new Error(errorMessage);
+        }
+        
+        const data = await response.json();
+        
+        // 프로바이더별 응답 추출
+        let content = '';
+        switch (provider) {
+            case 'claude':
+                content = data.content?.[0]?.text?.trim() || data.choices?.[0]?.message?.content?.trim() || '';
+                break;
+            case 'google':
+            case 'vertexai':
+                content = data.candidates?.[0]?.content?.trim() || data.choices?.[0]?.message?.content?.trim() || data.text?.trim() || '';
+                break;
+            default:
+                content = data.choices?.[0]?.message?.content?.trim() || '';
+                break;
+        }
+        
+        if (!content) {
+            throw new Error('Empty response from Backend API');
+        }
+        
+        return content;
+    } catch (error) {
+        log(`Backend API error: ${error.message}`);
+        logError('callBackendAPI', error, { provider, model });
         throw error;
     }
 }
@@ -294,7 +422,18 @@ export async function testApiConnection() {
 export function getApiStatus() {
     const settings = getSettings();
     
-    if (settings.apiSource === API_SOURCE.SILLYTAVERN) {
+    if (settings.apiSource === API_SOURCE.BACKEND) {
+        const provider = settings.backendProvider || 'google';
+        const providerInfo = BACKEND_PROVIDERS[provider];
+        const model = settings.backendModel;
+        const hasConfig = !!model;
+        
+        return {
+            source: "backend",
+            connected: hasConfig,
+            displayName: model ? `${providerInfo?.name || provider}: ${model}` : '모델 설정 필요'
+        };
+    } else if (settings.apiSource === API_SOURCE.SILLYTAVERN) {
         // Connection Profile 사용 중인지 확인
         if (settings.stConnectionProfile) {
             const profiles = extension_settings?.connectionManager?.profiles || [];

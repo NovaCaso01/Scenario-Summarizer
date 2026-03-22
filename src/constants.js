@@ -52,7 +52,18 @@ export const DATA_VERSION = 4; // 데이터 구조 버전 (마이그레이션용
 // API 소스 타입
 export const API_SOURCE = {
     SILLYTAVERN: "sillytavern",
+    BACKEND: "backend",
     CUSTOM: "custom"
+};
+
+// SillyTavern 백엔드 프로바이더 목록
+export const BACKEND_PROVIDERS = {
+    openai: { name: 'OpenAI', source: 'openai', secretKey: 'OPENAI' },
+    claude: { name: 'Claude', source: 'claude', secretKey: 'CLAUDE' },
+    google: { name: 'Google AI Studio', source: 'makersuite', secretKey: 'MAKERSUITE' },
+    vertexai: { name: 'Vertex AI', source: 'vertexai', secretKey: 'VERTEXAI' },
+    openrouter: { name: 'OpenRouter', source: 'openrouter', secretKey: 'OPENROUTER' },
+    deepseek: { name: 'DeepSeek', source: 'deepseek', secretKey: 'DEEPSEEK' }
 };
 
 // 기본 설정값
@@ -152,6 +163,12 @@ export const defaultSettings = {
     apiSource: API_SOURCE.SILLYTAVERN,
     useRawPrompt: true,            // Raw 프롬프트 사용 (캐릭터 카드 Scenario 제외)
     stConnectionProfile: "",       // SillyTavern Connection Manager 프로필 (빈 문자열 = 현재 연결 사용)
+    
+    // SillyTavern 백엔드 직접 호출 설정
+    backendProvider: "google",     // 백엔드 프로바이더 (openai, claude, google, vertexai, openrouter, deepseek)
+    backendModel: "",              // 백엔드 모델명
+    backendMaxTokens: 4000,        // 백엔드 max_tokens
+    
     customApiUrl: "",
     customApiKey: "",
     customApiModel: "",

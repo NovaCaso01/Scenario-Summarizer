@@ -285,6 +285,11 @@ export function updateUIFromSettings() {
     // SillyTavern Connection Profile 로드
     populateConnectionProfiles();
     
+    // 백엔드 설정 로드
+    $("#summarizer-backend-provider").val(settings.backendProvider || 'google');
+    $("#summarizer-backend-model").val(settings.backendModel || '');
+    $("#summarizer-backend-max-tokens").val(settings.backendMaxTokens || 4000);
+    
     // 커스텀 API 프리셋 로드
     populateApiPresets();
     
@@ -309,16 +314,22 @@ export function updateUIFromSettings() {
 }
 
 /**
- * 커스텀 API 섹션 토글
+ * API 섹션 토글 (3가지 모드)
  */
 function toggleCustomApiSection() {
     const settings = getSettings();
     if (settings.apiSource === 'custom') {
         $("#custom-api-section").show();
         $("#sillytavern-api-options").hide();
+        $("#backend-api-options").hide();
+    } else if (settings.apiSource === 'backend') {
+        $("#custom-api-section").hide();
+        $("#sillytavern-api-options").hide();
+        $("#backend-api-options").show();
     } else {
         $("#custom-api-section").hide();
         $("#sillytavern-api-options").show();
+        $("#backend-api-options").hide();
     }
 }
 
@@ -542,10 +553,13 @@ export function updateApiDisplay() {
     const $display = $("#current-api-display");
     
     if (status.connected) {
+        const sourceLabel = status.source === 'sillytavern' ? 'SillyTavern' 
+            : status.source === 'backend' ? '백엔드' 
+            : '커스텀';
         $display.html(`
             <div class="api-status-connected">
                 <i class="fa-solid fa-plug-circle-check"></i>
-                <span>${status.source === 'sillytavern' ? 'SillyTavern' : '커스텀'}: <strong>${status.displayName}</strong></span>
+                <span>${sourceLabel}: <strong>${status.displayName}</strong></span>
             </div>
         `);
     } else {
@@ -4139,6 +4153,28 @@ export function bindUIEvents() {
         settings.stConnectionProfile = $(this).val();
         saveSettings();
         updateApiDisplay();
+    });
+    
+    // 백엔드 설정
+    $("#summarizer-backend-provider").on("change", function() {
+        settings.backendProvider = $(this).val();
+        saveSettings();
+        updateApiDisplay();
+    });
+    
+    $("#summarizer-backend-model").on("change", function() {
+        settings.backendModel = $(this).val().trim();
+        saveSettings();
+        updateApiDisplay();
+    });
+    
+    $("#summarizer-backend-max-tokens").on("change", function() {
+        let value = parseInt($(this).val());
+        if (isNaN(value) || value < 500) value = 500;
+        if (value > 100000) value = 100000;
+        $(this).val(value);
+        settings.backendMaxTokens = value;
+        saveSettings();
     });
     
     // 커스텀 API 프리셋
