@@ -259,7 +259,7 @@ export async function injectSummaryToPrompt() {
         legacyItems.push({ order, content });
     }
     
-    // 현재 요약 분류 (pinned / normal)
+    // 현재 요약 분류 (pinned / hidden / normal)
     const pinnedItems = [];
     const normalItems = [];
     
@@ -268,6 +268,7 @@ export async function injectSummaryToPrompt() {
         const content = String(summary?.content ?? summary ?? '');
         if (isGroupIncludedContent(content)) continue;
         if (summary?.invalidated === true) continue;
+        if (summary?.hidden === true) continue; // 숨긴 요약은 주입하지 않음
         
         if (summary?.pinned) {
             pinnedItems.push({ index, content });
@@ -478,6 +479,7 @@ export async function getInjectionPreview(options = {}) {
         const summary = summaries[index];
         const content = String(summary?.content ?? summary ?? '');
         if (isGroupIncludedContent(content)) continue;
+        if (summary?.hidden === true) continue; // 숨긴 요약은 미리보기에서도 제외
         currentItems.push({ index, content });
     }
     

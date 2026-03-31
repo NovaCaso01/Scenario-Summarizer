@@ -4,6 +4,7 @@
 
 import { extension_settings } from "../../../../extensions.js";
 import { main_api, generateQuietPrompt, generateRaw, getRequestHeaders } from "../../../../../script.js";
+import { oai_settings } from "../../../../openai.js";
 import { extensionName, API_SOURCE, BACKEND_PROVIDERS } from './constants.js';
 import { log, getSettings, logError } from './state.js';
 
@@ -69,21 +70,26 @@ async function loadConnectionManager() {
 /**
  * 요약 API 호출 (메인 진입점)
  * @param {string} prompt - 요약 프롬프트
+ * @param {Object} [options] - 추가 옵션
+ * @param {number} [options.maxTokensOverride] - 출력 토큰 수 오버라이드 (압축 등 대량 출력 시)
  * @returns {Promise<string>}
  */
-export async function callSummaryAPI(prompt) {
+export async function callSummaryAPI(prompt, options = {}) {
     // 검열 완화 프롬프트를 앞에 추가
     const fullPrompt = ANTI_CENSORSHIP_PROMPT + prompt + PREFILL_PROMPT;
     const settings = getSettings();
     
+    // maxTokensOverride가 있으면 임시로 설정에 반영
+    const tokenOverride = options.maxTokensOverride || null;
+    
     if (settings.apiSource === API_SOURCE.CUSTOM) {
-        return await callCustomAPI(fullPrompt);
+        return await callCustomAPI(fullPrompt, tokenOverride);
     } else if (settings.apiSource === API_SOURCE.BACKEND) {
-        return await callBackendAPI(fullPrompt);
+        return await callBackendAPI(fullPrompt, tokenOverride);
     } else {
         // SillyTavern API - Connection Profile 사용 가능 여부 확인
         if (settings.stConnectionProfile) {
-            return await callConnectionManagerAPI(fullPrompt);
+            return await callConnectionManagerAPI(fullPrompt, tokenOverride);
         }
         return await callSillyTavernAPI(fullPrompt);
     }
@@ -94,7 +100,7 @@ export async function callSummaryAPI(prompt) {
  * @param {string} prompt 
  * @returns {Promise<string>}
  */
-async function callConnectionManagerAPI(prompt) {
+async function callConnectionManagerAPI(prompt, tokenOverride = null) {
     const settings = getSettings();
     
     const loaded = await loadConnectionManager();
@@ -116,7 +122,9 @@ async function callConnectionManagerAPI(prompt) {
     
     try {
         // 설정에서 응답 토큰 수 가져오기 (0 또는 미설정 = 프리셋 설정 사용)
-        const maxTokens = settings.maxResponseTokens || null;
+        // tokenOverride가 있으면 우선 적용 (압축 시 동적 부스트)
+        const stMax = settings.stMaxTokens || 0;
+        const maxTokens = tokenOverride || (stMax > 0 ? stMax : null);
         log(`Using ConnectionManager profile: ${profile.name} (maxTokens: ${maxTokens || 'preset default'})`);
         
         const messages = [
@@ -127,6 +135,16 @@ async function callConnectionManagerAPI(prompt) {
             { role: 'user', content: prompt }
         ];
         
+        // overridePayload 구성 (temperature, top_p, top_k)
+        const stTemp = settings.stTemperature !== undefined ? settings.stTemperature : 0.9;
+        const stTopP = settings.stTopP !== undefined ? settings.stTopP : 1;
+        const stTopK = settings.stTopK !== undefined ? settings.stTopK : 0;
+        const overridePayload = { temperature: stTemp };
+        if (stTopP < 1) overridePayload.top_p = stTopP;
+        if (stTopK > 0) overridePayload.top_k = stTopK;
+        
+        log(`[CP] overridePayload: ${JSON.stringify(overridePayload)}, maxTokens: ${maxTokens}`);
+        
         const result = await ConnectionManagerRequestService.sendRequest(
             profileId,
             messages,
@@ -136,7 +154,7 @@ async function callConnectionManagerAPI(prompt) {
                 includeInstruct: true,
                 stream: false
             },
-            {} // override payload
+            overridePayload
         );
         
         const content = result?.content || result || '';
@@ -145,9 +163,12 @@ async function callConnectionManagerAPI(prompt) {
             throw new Error('Empty response from ConnectionManager');
         }
         
+        log(`[CP] Response received (${content.length} chars), first 200: ${content.substring(0, 200)}`);
+        
         return content;
     } catch (error) {
-        log(`ConnectionManager API error: ${error.message}`);
+        const causeMsg = error.cause ? ` | Cause: ${error.cause.message || error.cause}` : '';
+        log(`ConnectionManager API error: ${error.message}${causeMsg}`);
         throw error;
     }
 }
@@ -158,11 +179,11 @@ async function callConnectionManagerAPI(prompt) {
  * @param {string} prompt 
  * @returns {Promise<string>}
  */
-async function callBackendAPI(prompt) {
+async function callBackendAPI(prompt, tokenOverride = null) {
     const settings = getSettings();
     const provider = settings.backendProvider || 'google';
     const model = settings.backendModel;
-    const maxTokens = settings.backendMaxTokens || 4000;
+    const maxTokens = tokenOverride || settings.backendMaxTokens || 8000;
     
     if (!model) {
         throw new Error('백엔드 API 모델이 설정되지 않았습니다');
@@ -198,18 +219,37 @@ async function callBackendAPI(prompt) {
         { role: 'user', content: prompt }
     ];
     
+    const temperature = settings.backendTemperature !== undefined ? settings.backendTemperature : 0.3;
+    const topP = settings.backendTopP !== undefined ? settings.backendTopP : 1;
+    const topK = settings.backendTopK !== undefined ? settings.backendTopK : 0;
+    
     const requestBody = {
         model: model,
         messages: messages,
-        temperature: 0.3,
+        temperature: temperature,
         stream: false,
         chat_completion_source: providerInfo.source,
         max_tokens: maxTokens
     };
     
+    // Top P 적용 (1 미만일 때만)
+    if (topP < 1) {
+        requestBody.top_p = topP;
+    }
+    
+    // Top K 적용 (0 초과일 때만)
+    if (topK > 0) {
+        requestBody.top_k = topK;
+    }
+    
     // Vertex AI 추가 파라미터
     if (provider === 'vertexai') {
-        requestBody.vertexai_auth_mode = 'full';
+        requestBody.vertexai_auth_mode = oai_settings.vertexai_auth_mode || 'express';
+        requestBody.vertexai_region = oai_settings.vertexai_region || 'global';
+
+        if (requestBody.vertexai_auth_mode === 'express' && oai_settings.vertexai_express_project_id) {
+            requestBody.vertexai_express_project_id = oai_settings.vertexai_express_project_id;
+        }
     }
     
     log(`Using Backend API: ${providerInfo.name} / ${model} (maxTokens: ${maxTokens})`);
@@ -303,7 +343,7 @@ async function callSillyTavernAPI(prompt) {
  * @param {string} prompt 
  * @returns {Promise<string>}
  */
-async function callCustomAPI(prompt) {
+async function callCustomAPI(prompt, tokenOverride = null) {
     const settings = getSettings();
     
     if (!settings.customApiUrl || !settings.customApiModel) {
@@ -323,7 +363,7 @@ async function callCustomAPI(prompt) {
         const timeout = (settings.customApiTimeout || 60) * 1000; // 설정에서 타임아웃 가져오기 (기본 60초)
         const timeoutId = setTimeout(() => controller.abort(), timeout);
         
-        const maxTokens = settings.customApiMaxTokens || 5000; // 설정에서 max_tokens 가져오기
+        const maxTokens = tokenOverride || settings.customApiMaxTokens || 8000; // tokenOverride 우선, 설정에서 max_tokens 가져오기
         const model = settings.customApiModel.toLowerCase();
         
         // OpenAI 새 모델들은 max_completion_tokens 사용
@@ -335,8 +375,20 @@ async function callCustomAPI(prompt) {
         const requestBody = {
             model: settings.customApiModel,
             messages: [{ role: "user", content: prompt }],
-            temperature: 0.3
+            temperature: settings.customApiTemperature !== undefined ? settings.customApiTemperature : 1
         };
+        
+        // Top P 적용 (1 미만일 때만)
+        const customTopP = settings.customApiTopP !== undefined ? settings.customApiTopP : 1;
+        if (customTopP < 1) {
+            requestBody.top_p = customTopP;
+        }
+        
+        // Top K 적용 (0 초과일 때만)
+        const customTopK = settings.customApiTopK !== undefined ? settings.customApiTopK : 0;
+        if (customTopK > 0) {
+            requestBody.top_k = customTopK;
+        }
         
         // 토큰 파라미터 선택
         if (useMaxCompletionTokens) {

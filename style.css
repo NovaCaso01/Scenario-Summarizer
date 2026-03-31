@@ -822,6 +822,47 @@
     margin-bottom: var(--summarizer-spacing-sm);
 }
 
+.summarizer-range-value {
+    font-weight: 600;
+    color: var(--sum-accent);
+    margin-left: 6px;
+}
+
+.summarizer-input-group input[type="range"] {
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--sum-bg-input);
+    border: 1px solid var(--sum-border);
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+    margin-top: 4px;
+}
+
+.summarizer-input-group input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--sum-accent);
+    cursor: pointer;
+    border: 2px solid var(--sum-bg-primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.summarizer-input-group input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--sum-accent);
+    cursor: pointer;
+    border: 2px solid var(--sum-bg-primary);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
 .summarizer-input-group input[type="text"],
 .summarizer-input-group input[type="password"],
 .summarizer-input-group input[type="number"],
@@ -1614,6 +1655,23 @@
     border-top: 1px solid var(--sum-border-light);
 }
 
+/* 범위 지정 입력 행 */
+.summarizer-custom-range-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    padding: 6px 8px;
+    background: var(--sum-bg-tertiary);
+    border-radius: var(--summarizer-radius-sm);
+}
+
+.summarizer-range-separator {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--sum-text-muted);
+}
+
 .summarizer-section-label {
     font-size: 11px;
     font-weight: 600;
@@ -1965,6 +2023,47 @@ pre.summarizer-entry-content {
 
 .summarizer-pin-entry.active i {
     color: var(--sum-accent) !important;
+}
+
+/* ===== 숨긴 요약 ===== */
+.summarizer-entry-hidden {
+    border-left: 3px solid var(--sum-text-hint);
+    background: color-mix(in srgb, var(--sum-bg-secondary) 40%, var(--sum-bg-primary));
+    opacity: 0.7;
+}
+
+.summarizer-entry-hidden .summarizer-entry-content {
+    color: var(--sum-text-muted);
+}
+
+.summarizer-hide-entry.active {
+    color: var(--sum-text-hint) !important;
+}
+
+.summarizer-hide-entry.active i {
+    color: var(--sum-text-hint) !important;
+}
+
+.summarizer-hidden-badge {
+    display: inline-block;
+    margin-left: 6px;
+    padding: 2px 7px;
+    font-size: 9px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: var(--sum-bg-primary);
+    background: var(--sum-text-hint);
+    border-radius: 10px;
+    cursor: help;
+    vertical-align: middle;
+    line-height: 1.4;
+}
+
+/* ===== 필터 버튼 숨기기 모드 ===== */
+#summarizer-filter-pinned-memo.active-hidden {
+    background: var(--sum-text-hint) !important;
+    color: var(--sum-accent-text) !important;
+    border-color: var(--sum-text-hint) !important;
 }
 
 /* ===== 잘린(미전달) 요약 ===== */

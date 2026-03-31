@@ -363,7 +363,7 @@ export function setSummaryForMessage(messageIndex, content) {
     const data = getSummaryData();
     if (!data) return null;
     
-    // 기존 요약의 pinned/memo 보존
+    // 기존 요약의 pinned/hidden/memo 보존
     const existing = data.summaries[messageIndex];
     
     const summary = {
@@ -371,6 +371,7 @@ export function setSummaryForMessage(messageIndex, content) {
         content: content,
         timestamp: new Date().toISOString(),
         pinned: existing?.pinned || false,
+        hidden: existing?.hidden || false,
         memo: existing?.memo || ''
     };
     

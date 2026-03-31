@@ -48,7 +48,7 @@ const ITEMS_PER_PAGE = 10;
 // 정렬 순서 (요약 보기): 'newest' = 최신순, 'oldest' = 오래된순
 let summarySortOrder = 'newest';
 
-// 필터 모드: 'all' = 전체, 'pinned' = 핀 고정만
+// 필터 모드: 'all' = 전체, 'pinned' = 핀 고정만, 'hidden' = 숨긴 요약만
 let summaryFilterMode = 'all';
 
 // 토큰 카운터 함수 (동적 로드)
@@ -276,8 +276,21 @@ export function updateUIFromSettings() {
     $("#summarizer-use-raw").prop("checked", settings.useRawPrompt);
     $("#summarizer-custom-url").val(settings.customApiUrl);
     $("#summarizer-custom-key").val(settings.customApiKey);
-    $("#summarizer-custom-max-tokens").val(settings.customApiMaxTokens || 5000);
+    $("#summarizer-custom-max-tokens").val(settings.customApiMaxTokens || 8000);
     $("#summarizer-custom-timeout").val(settings.customApiTimeout || 60);
+    
+    // Custom API Temperature / Top P / Top K
+    const customTemp = settings.customApiTemperature !== undefined ? settings.customApiTemperature : 1;
+    $("#summarizer-custom-temperature").val(customTemp);
+    $("#summarizer-custom-temperature-value").text(customTemp);
+    
+    const customTopP = settings.customApiTopP !== undefined ? settings.customApiTopP : 1;
+    $("#summarizer-custom-top-p").val(customTopP);
+    $("#summarizer-custom-top-p-value").text(customTopP);
+    
+    const customTopK = settings.customApiTopK !== undefined ? settings.customApiTopK : 0;
+    $("#summarizer-custom-top-k").val(customTopK);
+    $("#summarizer-custom-top-k-value").text(customTopK);
     
     toggleCustomApiSection();
     toggleSummaryModeOptions();
@@ -288,7 +301,36 @@ export function updateUIFromSettings() {
     // 백엔드 설정 로드
     $("#summarizer-backend-provider").val(settings.backendProvider || 'google');
     $("#summarizer-backend-model").val(settings.backendModel || '');
-    $("#summarizer-backend-max-tokens").val(settings.backendMaxTokens || 4000);
+    $("#summarizer-backend-max-tokens").val(settings.backendMaxTokens || 8000);
+    
+    // 백엔드 Temperature / Top P / Top K
+    const backendTemp = settings.backendTemperature !== undefined ? settings.backendTemperature : 1;
+    $("#summarizer-backend-temperature").val(backendTemp);
+    $("#summarizer-backend-temperature-value").text(backendTemp);
+    
+    const backendTopP = settings.backendTopP !== undefined ? settings.backendTopP : 1;
+    $("#summarizer-backend-top-p").val(backendTopP);
+    $("#summarizer-backend-top-p-value").text(backendTopP);
+    
+    const backendTopK = settings.backendTopK !== undefined ? settings.backendTopK : 0;
+    $("#summarizer-backend-top-k").val(backendTopK);
+    $("#summarizer-backend-top-k-value").text(backendTopK);
+    
+    // Connection Profile Max Tokens
+    $("#summarizer-st-max-tokens").val(settings.stMaxTokens || 4000);
+    
+    // Connection Profile Temperature / Top P / Top K
+    const stTemp = settings.stTemperature !== undefined ? settings.stTemperature : 1;
+    $("#summarizer-st-temperature").val(stTemp);
+    $("#summarizer-st-temperature-value").text(stTemp);
+    
+    const stTopP = settings.stTopP !== undefined ? settings.stTopP : 1;
+    $("#summarizer-st-top-p").val(stTopP);
+    $("#summarizer-st-top-p-value").text(stTopP);
+    
+    const stTopK = settings.stTopK !== undefined ? settings.stTopK : 0;
+    $("#summarizer-st-top-k").val(stTopK);
+    $("#summarizer-st-top-k-value").text(stTopK);
     
     // 커스텀 API 프리셋 로드
     populateApiPresets();
@@ -930,16 +972,29 @@ export async function viewSummaries() {
  * 핀 고정 필터 토글
  */
 async function togglePinnedMemoFilter() {
-    summaryFilterMode = summaryFilterMode === 'all' ? 'pinned' : 'all';
+    // all -> pinned -> hidden -> all 순환
+    if (summaryFilterMode === 'all') {
+        summaryFilterMode = 'pinned';
+    } else if (summaryFilterMode === 'pinned') {
+        summaryFilterMode = 'hidden';
+    } else {
+        summaryFilterMode = 'all';
+    }
     currentPage = 0;
     
     const $btn = $("#summarizer-filter-pinned-memo");
     if (summaryFilterMode === 'pinned') {
-        $btn.addClass('active');
-        $btn.attr('title', '전체 보기로 전환');
+        $btn.addClass('active').removeClass('active-hidden');
+        $btn.attr('title', '📌 핀 고정만 보기 중 (클릭: 숨긴 요약만)');
+        $btn.find('i').attr('class', 'fa-solid fa-thumbtack');
+    } else if (summaryFilterMode === 'hidden') {
+        $btn.addClass('active-hidden').removeClass('active');
+        $btn.attr('title', '숨긴 요약만 보기 중 (클릭: 전체 보기)');
+        $btn.find('i').attr('class', 'fa-solid fa-eye-slash');
     } else {
-        $btn.removeClass('active');
+        $btn.removeClass('active active-hidden');
         $btn.attr('title', '📌 핀 고정만 모아보기');
+        $btn.find('i').attr('class', 'fa-solid fa-bookmark');
     }
     
     await renderSummaryList();
@@ -1000,11 +1055,16 @@ async function renderSummaryList() {
         return !isGroupIncludedContent(content);
     });
     
-    // 핀 고정 필터 적용
+    // 필터 적용 (pinned / hidden)
     if (summaryFilterMode === 'pinned') {
         indices = indices.filter(index => {
             const summary = summaries[index];
             return summary?.pinned === true;
+        });
+    } else if (summaryFilterMode === 'hidden') {
+        indices = indices.filter(index => {
+            const summary = summaries[index];
+            return summary?.hidden === true;
         });
     }
     
@@ -1014,6 +1074,8 @@ async function renderSummaryList() {
     if (indices.length === 0) {
         const emptyMsg = summaryFilterMode === 'pinned' 
             ? '핀 고정된 요약이 없습니다.'
+            : summaryFilterMode === 'hidden'
+            ? '숨긴 요약이 없습니다.'
             : '저장된 요약이 없습니다.';
         $content.html(`<p class="summarizer-placeholder">${emptyMsg}</p>`);
         $pagination.hide();
@@ -1047,7 +1109,8 @@ async function renderSummaryList() {
     }
     
     // 필터 모드 표시
-    const filterLabel = summaryFilterMode === 'pinned' ? ' · <i class="fa-solid fa-filter"></i> 핀 고정만' : '';
+    const filterLabel = summaryFilterMode === 'pinned' ? ' · <i class="fa-solid fa-filter"></i> 핀 고정만' 
+        : summaryFilterMode === 'hidden' ? ' · <i class="fa-solid fa-filter"></i> 숨긴 요약만' : '';
     
     let html = `<div class="summarizer-summary-header">
         <strong>${getCharacterName()} 시나리오 요약</strong>
@@ -1068,6 +1131,7 @@ async function renderSummaryList() {
         const isInvalidated = summary?.invalidated === true;
         const invalidReason = summary?.invalidReason || '';
         const isPinned = summary?.pinned === true;
+        const isHidden = summary?.hidden === true;
         const memo = summary?.memo || '';
         const isSkipped = skippedIndices.has(index);
         
@@ -1101,6 +1165,11 @@ async function renderSummaryList() {
         const pinnedClass = isPinned ? ' summarizer-entry-pinned' : '';
         const pinnedIcon = isPinned ? 'fa-solid' : 'fa-regular';
         
+        // 숨기기 스타일
+        const hiddenClass = isHidden ? ' summarizer-entry-hidden' : '';
+        const hiddenIcon = isHidden ? 'fa-solid' : 'fa-regular';
+        const hiddenBadge = isHidden ? '<span class="summarizer-hidden-badge" title="숨긴 요약 (AI에게 전달되지 않음)">숨김</span>' : '';
+        
         // 잘린 요약 스타일
         const skippedClass = isSkipped ? ' summarizer-entry-skipped' : '';
         const skippedBadge = isSkipped ? '<span class="summarizer-skipped-badge" title="토큰 예산 초과로 AI에게 전달되지 않는 요약입니다">미전달</span>' : '';
@@ -1128,12 +1197,15 @@ async function renderSummaryList() {
             : '';
         
         html += `
-        <div class="summarizer-entry${invalidatedClass}${errorClass}${pinnedClass}${skippedClass}" data-msg-index="${index}">
+        <div class="summarizer-entry${invalidatedClass}${errorClass}${pinnedClass}${hiddenClass}${skippedClass}" data-msg-index="${index}">
             <div class="summarizer-entry-header">
-                <span class="summarizer-entry-number">${displayNumber}${invalidatedBadge}${errorBadge}${skippedBadge}</span>
+                <span class="summarizer-entry-number">${displayNumber}${invalidatedBadge}${errorBadge}${hiddenBadge}${skippedBadge}</span>
                 <div class="summarizer-entry-actions">
                     <button class="summarizer-btn summarizer-btn-tiny summarizer-pin-entry ${isPinned ? 'active' : ''}" data-idx="${index}" title="${isPinned ? '핀 해제' : '핀 고정 (토큰 예산 초과 시에도 우선 포함)'}">
                         <i class="${pinnedIcon} fa-thumbtack"></i>
+                    </button>
+                    <button class="summarizer-btn summarizer-btn-tiny summarizer-hide-entry ${isHidden ? 'active' : ''}" data-idx="${index}" title="${isHidden ? '숨기기 해제' : '숨기기 (AI에게 전달하지 않음)'}">
+                        <i class="${hiddenIcon} fa-eye-slash"></i>
                     </button>
                     <button class="summarizer-btn summarizer-btn-tiny summarizer-memo-toggle" data-idx="${index}" title="${memo ? '메모 수정' : '메모 추가'}">
                         <i class="fa-${memo ? 'solid' : 'regular'} fa-sticky-note"></i>
@@ -1292,6 +1364,10 @@ function bindEntryEventsDelegated() {
         
         const summary = data.summaries[idx];
         summary.pinned = !summary.pinned;
+        // 핀과 숨기기는 상호 배타적
+        if (summary.pinned && summary.hidden) {
+            summary.hidden = false;
+        }
         data.lastUpdate = new Date().toLocaleString("ko-KR");
         
         await saveSummaryData();
@@ -1299,6 +1375,29 @@ function bindEntryEventsDelegated() {
         await injectSummaryToPrompt();
         
         showToast('info', summary.pinned ? `#${idx} 핀 고정됨 (우선 포함)` : `#${idx} 핀 해제됨`);
+        await renderSummaryList();
+        updateStatusDisplay();
+    });
+    
+    // 숨기기/해제
+    $container.on("click", ".summarizer-hide-entry", async function() {
+        const idx = parseInt($(this).data("idx"));
+        const data = getSummaryData();
+        if (!data || !data.summaries[idx]) return;
+        
+        const summary = data.summaries[idx];
+        summary.hidden = !summary.hidden;
+        // 핀과 숨기기는 상호 배타적
+        if (summary.hidden && summary.pinned) {
+            summary.pinned = false;
+        }
+        data.lastUpdate = new Date().toLocaleString("ko-KR");
+        
+        await saveSummaryData();
+        invalidateTokenCache();
+        await injectSummaryToPrompt();
+        
+        showToast('info', summary.hidden ? `#${idx} 숨김 처리됨 (AI에게 미전달)` : `#${idx} 숨기기 해제됨`);
         await renderSummaryList();
         updateStatusDisplay();
     });
@@ -1806,11 +1905,11 @@ function getValidSummaryKeys(summaries) {
 function setupRangeRadioListeners(prefix) {
     $(`input[name="${prefix}-range"]`).off('change').on('change', function() {
         const val = $(this).val();
-        $(`#summarizer-${prefix}-recent-count, #summarizer-${prefix}-old-count`).prop('disabled', true);
-        if (val === 'recent') {
-            $(`#summarizer-${prefix}-recent-count`).prop('disabled', false).focus();
-        } else if (val === 'old') {
-            $(`#summarizer-${prefix}-old-count`).prop('disabled', false).focus();
+        if (val === 'custom') {
+            $(`#summarizer-${prefix}-custom-range`).show();
+            $(`#summarizer-${prefix}-range-start`).focus();
+        } else {
+            $(`#summarizer-${prefix}-custom-range`).hide();
         }
     });
 }
@@ -1824,12 +1923,14 @@ function setupRangeRadioListeners(prefix) {
 function getTargetKeysFromRadio(prefix, validKeys) {
     const rangeType = $(`input[name="${prefix}-range"]:checked`).val() || 'all';
     
-    if (rangeType === 'recent') {
-        const count = parseInt($(`#summarizer-${prefix}-recent-count`).val()) || 20;
-        return validKeys.slice(-count);
-    } else if (rangeType === 'old') {
-        const count = parseInt($(`#summarizer-${prefix}-old-count`).val()) || 20;
-        return validKeys.slice(0, count);
+    if (rangeType === 'custom') {
+        const startNum = parseInt($(`#summarizer-${prefix}-range-start`).val());
+        const endNum = parseInt($(`#summarizer-${prefix}-range-end`).val());
+        if (isNaN(startNum) || isNaN(endNum)) return [...validKeys];
+        // 순번은 1-based, 배열 인덱스는 0-based
+        const lo = Math.max(0, Math.min(startNum, endNum) - 1);
+        const hi = Math.min(validKeys.length - 1, Math.max(startNum, endNum) - 1);
+        return validKeys.slice(lo, hi + 1);
     }
     return [...validKeys]; // 전체
 }
@@ -1856,13 +1957,19 @@ function openCompressModal() {
     
     // 라디오 초기화
     $('input[name="compress-range"][value="all"]').prop('checked', true);
-    $("#summarizer-compress-recent-count, #summarizer-compress-old-count").prop('disabled', true);
+    $("#summarizer-compress-custom-range").hide();
+    // 범위 지정 기본값: 1 ~ 압축대상 개수 (순번 기준)
+    if (validKeys.length > 0) {
+        $("#summarizer-compress-range-start").val(1).attr({ 'placeholder': '1', 'min': 1, 'max': validKeys.length });
+        $("#summarizer-compress-range-end").val(validKeys.length).attr({ 'placeholder': String(validKeys.length), 'min': 1, 'max': validKeys.length });
+    }
     setupRangeRadioListeners('compress');
     
     // 미리보기/진행률 초기화
     $("#summarizer-compress-progress").hide();
     $("#summarizer-compress-preview-area").empty();
     $("#summarizer-compress-apply").prop('disabled', true);
+    $("#summarizer-compress-save-file").prop('disabled', true);
     compressPreviewData = null;
     
     $("#summarizer-compress-modal").css('display', 'flex');
@@ -1905,6 +2012,7 @@ async function executeCompressSummaries() {
     // UI 상태 변경
     $("#summarizer-compress-execute").prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin"></i> 압축 중...');
     $("#summarizer-compress-apply").prop('disabled', true);
+    $("#summarizer-compress-save-file").prop('disabled', true);
     
     // 진행률 표시
     $("#summarizer-compress-progress").show();
@@ -2034,8 +2142,42 @@ async function renderCompressPreview(result) {
     previewHtml += '</div>';
     $("#summarizer-compress-preview-area").html(previewHtml);
     $("#summarizer-compress-apply").prop('disabled', false);
+    $("#summarizer-compress-save-file").prop('disabled', false);
     
     showToast('success', `${compressedCount}개 요약 압축 완료 - 미리보기를 확인하세요`);
+}
+
+/**
+ * 압축 결과를 JSON 파일로 저장
+ */
+function saveCompressResultToFile() {
+    if (!compressPreviewData || !compressPreviewData.compressedSummaries) {
+        showToast('error', '저장할 압축 결과가 없습니다.');
+        return;
+    }
+    
+    try {
+        const charName = getCharacterName();
+        const exportData = {
+            exportDate: new Date().toISOString(),
+            characterName: charName,
+            type: 'compress-result',
+            originalSummaries: compressPreviewData.originalSummaries,
+            compressedSummaries: compressPreviewData.compressedSummaries
+        };
+        const json = JSON.stringify(exportData, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `compress-result-${charName}-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showToast('success', '압축 결과가 파일로 저장되었습니다.');
+    } catch (e) {
+        logError('saveCompressResultToFile', e);
+        showToast('error', '파일 저장 중 오류: ' + e.message);
+    }
 }
 
 /**
@@ -3908,8 +4050,11 @@ export function saveApiSettings() {
     settings.customApiUrl = $("#summarizer-custom-url").val().trim();
     settings.customApiKey = $("#summarizer-custom-key").val();
     settings.customApiModel = $("#summarizer-custom-model").val();
-    settings.customApiMaxTokens = parseInt($("#summarizer-custom-max-tokens").val()) || 5000;
+    settings.customApiMaxTokens = parseInt($("#summarizer-custom-max-tokens").val()) || 8000;
     settings.customApiTimeout = parseInt($("#summarizer-custom-timeout").val()) || 60;
+    settings.customApiTemperature = parseFloat($("#summarizer-custom-temperature").val());
+    settings.customApiTopP = parseFloat($("#summarizer-custom-top-p").val());
+    settings.customApiTopK = parseInt($("#summarizer-custom-top-k").val());
     
     saveSettings();
     updateApiDisplay();
@@ -4177,10 +4322,90 @@ export function bindUIEvents() {
         saveSettings();
     });
     
+    // 백엔드 Temperature 슬라이더
+    $("#summarizer-backend-temperature").on("input", function() {
+        const value = parseFloat($(this).val());
+        $("#summarizer-backend-temperature-value").text(value);
+        settings.backendTemperature = value;
+        saveSettings();
+    });
+    
+    // 백엔드 Top P 슬라이더
+    $("#summarizer-backend-top-p").on("input", function() {
+        const value = parseFloat($(this).val());
+        $("#summarizer-backend-top-p-value").text(value);
+        settings.backendTopP = value;
+        saveSettings();
+    });
+    
+    // 백엔드 Top K 슬라이더
+    $("#summarizer-backend-top-k").on("input", function() {
+        const value = parseInt($(this).val());
+        $("#summarizer-backend-top-k-value").text(value);
+        settings.backendTopK = value;
+        saveSettings();
+    });
+    
+    // Connection Profile Max Tokens
+    $("#summarizer-st-max-tokens").on("change", function() {
+        let value = parseInt($(this).val());
+        if (isNaN(value) || value < 0) value = 0;
+        if (value > 100000) value = 100000;
+        $(this).val(value);
+        settings.stMaxTokens = value;
+        saveSettings();
+    });
+    
+    // Connection Profile Temperature
+    $("#summarizer-st-temperature").on("input", function() {
+        const value = parseFloat($(this).val());
+        $("#summarizer-st-temperature-value").text(value);
+        settings.stTemperature = value;
+        saveSettings();
+    });
+    
+    // Connection Profile Top P
+    $("#summarizer-st-top-p").on("input", function() {
+        const value = parseFloat($(this).val());
+        $("#summarizer-st-top-p-value").text(value);
+        settings.stTopP = value;
+        saveSettings();
+    });
+    
+    // Connection Profile Top K
+    $("#summarizer-st-top-k").on("input", function() {
+        const value = parseInt($(this).val());
+        $("#summarizer-st-top-k-value").text(value);
+        settings.stTopK = value;
+        saveSettings();
+    });
+    
     // 커스텀 API 프리셋
     $("#summarizer-preset-select").on("change", loadSelectedPreset);
     $("#summarizer-save-preset").on("click", saveApiPreset);
     $("#summarizer-delete-preset").on("click", deleteApiPreset);
+    
+    // Custom API Temperature / Top P / Top K 슬라이더
+    $("#summarizer-custom-temperature").on("input", function() {
+        const value = parseFloat($(this).val());
+        $("#summarizer-custom-temperature-value").text(value);
+        settings.customApiTemperature = value;
+        saveSettings();
+    });
+    
+    $("#summarizer-custom-top-p").on("input", function() {
+        const value = parseFloat($(this).val());
+        $("#summarizer-custom-top-p-value").text(value);
+        settings.customApiTopP = value;
+        saveSettings();
+    });
+    
+    $("#summarizer-custom-top-k").on("input", function() {
+        const value = parseInt($(this).val());
+        $("#summarizer-custom-top-k-value").text(value);
+        settings.customApiTopK = value;
+        saveSettings();
+    });
     
     $("#summarizer-load-models").on("click", doLoadModels);
     $("#summarizer-save-api").on("click", saveApiSettings);
@@ -4253,6 +4478,7 @@ export function bindUIEvents() {
     $("#summarizer-compress-modal-close").on("click", closeCompressModal);
     $("#summarizer-compress-modal .summarizer-modal-overlay").on("click", closeCompressModal);
     $("#summarizer-compress-execute").on("click", executeCompressSummaries);
+    $("#summarizer-compress-save-file").on("click", saveCompressResultToFile);
     $("#summarizer-compress-apply").on("click", applyCompressResult);
     $("#summarizer-compress-cancel-run").on("click", function() {
         cancelCompress();

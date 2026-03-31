@@ -1617,18 +1617,16 @@ export async function compressSummaries(targetKeys, pinnedIndices = [], onProgre
             return { success: false, error: '압축할 요약이 없습니다.' };
         }
         
-        // 배치 분할 (고정 25개)
-        const BATCH_SIZE = 25;
-        const batches = [];
-        for (let i = 0; i < targets.length; i += BATCH_SIZE) {
-            batches.push(targets.slice(i, i + BATCH_SIZE));
-        }
+        // 동적 배치 분할 (토큰 기반 + 최대 15개 상한)
+        const MAX_BATCH_SIZE = 15;
+        const MAX_BATCH_TOKENS = 20000; // 배치당 입력 토큰 상한
+        const batches = buildDynamicBatches(targets, MAX_BATCH_SIZE, MAX_BATCH_TOKENS);
         
         const originalSummaries = {};
         const compressedSummaries = {};
         compressState.progress = { current: 0, total: targets.length };
         
-        log(`[압축] ${targets.length}개 요약을 ${batches.length}개 배치로 압축 시작`);
+        log(`[압축] ${targets.length}개 요약을 ${batches.length}개 배치로 압축 시작 (동적 분할, 최대 ${MAX_BATCH_SIZE}개/배치, ${MAX_BATCH_TOKENS}토큰/배치)`);
         
         for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
             // 취소 확인
@@ -1639,71 +1637,16 @@ export async function compressSummaries(targetKeys, pinnedIndices = [], onProgre
             
             const batch = batches[batchIdx];
             
-            // 배치 내 요약 텍스트 조합 (그룹 헤더 유지)
-            const summaryText = batch
-                .map(t => `${t.groupHeader}\n${t.content.replace(/^#\d+(?:-\d+)?\s*\n?/, '').trim()}`)
-                .join('\n\n');
+            // 배치 처리 (잘림 감지 시 자동 분할 재시도 포함)
+            const batchResult = await processCompressBatch(batch, batchIdx, batches.length, targets.length, onProgress, compressState);
             
             // 원본 저장
             for (const t of batch) {
                 originalSummaries[t.key] = t.content;
             }
             
-            // 진행률 업데이트
-            if (onProgress) {
-                onProgress(compressState.progress.current, targets.length, `배치 ${batchIdx + 1}/${batches.length} 처리 중...`);
-            }
-            
-            // API 호출 (재시도 로직 포함)
-            const prompt = DEFAULT_COMPRESS_PROMPT_TEMPLATE + '\n\n---\n\n' + summaryText;
-            let response = null;
-            const MAX_RETRIES = 3;
-            
-            // API 호출 전 취소 확인
-            if (compressState.shouldCancel) {
-                log(`[압축] 사용자에 의해 취소됨 (${Object.keys(compressedSummaries).length}개 완료)`);
-                return { success: false, cancelled: true, originalSummaries, compressedSummaries, error: '사용자에 의해 취소되었습니다.' };
-            }
-            
-            for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
-                try {
-                    response = await callSummaryAPI(prompt);
-                    break; // 성공 시 루프 탈출
-                } catch (apiError) {
-                    const isRateLimit = apiError.message?.includes('high demand') ||
-                        apiError.message?.includes('rate') ||
-                        apiError.message?.includes('429') ||
-                        apiError.message?.includes('500') ||
-                        apiError.message?.includes('overloaded');
-                    
-                    if (isRateLimit && attempt < MAX_RETRIES - 1) {
-                        const delay = (attempt + 1) * 10; // 10초, 20초, 30초
-                        log(`[압축] 배치 ${batchIdx + 1} API 과부하, ${delay}초 후 재시도 (${attempt + 1}/${MAX_RETRIES})`);
-                        if (onProgress) {
-                            onProgress(compressState.progress.current, targets.length, `API 과부하 - ${delay}초 대기 후 재시도...`);
-                        }
-                        await new Promise(r => setTimeout(r, delay * 1000));
-                        
-                        if (compressState.shouldCancel) {
-                            return { success: false, cancelled: true, originalSummaries, compressedSummaries, error: '사용자에 의해 취소되었습니다.' };
-                        }
-                    } else {
-                        log(`[압축] 배치 ${batchIdx + 1} API 오류: ${apiError.message}`);
-                        break;
-                    }
-                }
-            }
-            
-            if (!response) {
-                log(`[압축] 배치 ${batchIdx + 1} 응답 없음, 건너뜀`);
-                compressState.progress.current += batch.length;
-                continue;
-            }
-            
-            // 응답 파싱 - 그룹 헤더(#0-4) 보존
-            const parsed = parseCompressedResponse(response, batch);
-            
-            for (const [key, content] of Object.entries(parsed)) {
+            // 결과 병합
+            for (const [key, content] of Object.entries(batchResult)) {
                 compressedSummaries[key] = content;
             }
             
@@ -1719,7 +1662,7 @@ export async function compressSummaries(targetKeys, pinnedIndices = [], onProgre
             }
         }
         
-        // 루프 완료 후 취소 확인 (단일 배치에서 API 호출 중 취소된 경우)
+        // 루프 완료 후 취소 확인
         if (compressState.shouldCancel) {
             log(`[압축] 사용자에 의해 취소됨 (${Object.keys(compressedSummaries).length}개 완료)`);
             return { success: false, cancelled: true, originalSummaries, compressedSummaries, error: '사용자에 의해 취소되었습니다.' };
@@ -1743,6 +1686,214 @@ export async function compressSummaries(targetKeys, pinnedIndices = [], onProgre
 }
 
 /**
+ * 간단한 토큰 추정 (한국어/영어 혼합 대응)
+ * @param {string} text - 추정할 텍스트
+ * @returns {number} - 추정 토큰 수
+ */
+function estimateTokens(text) {
+    if (!text) return 0;
+    const koreanChars = (text.match(/[\u3131-\uD79D]/g) || []).length;
+    const otherChars = text.length - koreanChars;
+    return Math.ceil(koreanChars / 2 + otherChars / 4);
+}
+
+/**
+ * 토큰 기반 동적 배치 분할
+ * @param {Array} targets - 압축 대상 목록
+ * @param {number} maxSize - 배치당 최대 개수
+ * @param {number} maxTokens - 배치당 최대 토큰 수
+ * @returns {Array<Array>} - 분할된 배치 배열
+ */
+function buildDynamicBatches(targets, maxSize, maxTokens) {
+    const batches = [];
+    let currentBatch = [];
+    let currentTokens = 0;
+    
+    for (const target of targets) {
+        const targetTokens = estimateTokens(target.content);
+        
+        // 현재 배치에 추가하면 토큰 초과 또는 개수 초과인 경우 새 배치 시작
+        if (currentBatch.length > 0 && (currentTokens + targetTokens > maxTokens || currentBatch.length >= maxSize)) {
+            batches.push(currentBatch);
+            currentBatch = [];
+            currentTokens = 0;
+        }
+        
+        currentBatch.push(target);
+        currentTokens += targetTokens;
+    }
+    
+    // 마지막 배치
+    if (currentBatch.length > 0) {
+        batches.push(currentBatch);
+    }
+    
+    log(`[압축] 동적 배치 분할: ${targets.length}개 → ${batches.length}개 배치 (${batches.map(b => b.length + '개').join(', ')})`);
+    
+    return batches;
+}
+
+/**
+ * 단일 압축 배치 처리 (잘림 감지 시 자동 분할 재시도)
+ * @param {Array} batch - 배치 타겟 목록
+ * @param {number} batchIdx - 현재 배치 인덱스
+ * @param {number} totalBatches - 전체 배치 수
+ * @param {number} totalTargets - 전체 타겟 수
+ * @param {Function} onProgress - 진행률 콜백
+ * @param {Object} state - compressState 참조
+ * @returns {Promise<Object>} - key별 압축된 요약
+ */
+async function processCompressBatch(batch, batchIdx, totalBatches, totalTargets, onProgress, state) {
+    // 배치 내 요약 텍스트 조합 (그룹 헤더 유지)
+    const summaryText = batch
+        .map(t => `${t.groupHeader}\n${t.content.replace(/^#\d+(?:-\d+)?\s*\n?/, '').trim()}`)
+        .join('\n\n');
+    
+    // 진행률 업데이트
+    if (onProgress) {
+        onProgress(state.progress.current, totalTargets, `배치 ${batchIdx + 1}/${totalBatches} 처리 중... (${batch.length}개)`);
+    }
+    
+    // 입력 토큰 추정 → 출력 토큰 부스트 계산
+    const inputTokens = estimateTokens(summaryText);
+    // 압축은 입력의 60-80%를 출력하므로, 입력 토큰 × 1.2를 출력으로 (넓넓한 안전 마진)
+    const boostedMaxTokens = Math.max(8000, Math.ceil(inputTokens * 1.2));
+    log(`[압축] 배치 ${batchIdx + 1}: ${batch.length}개, 입력 ~${inputTokens}토큰, 출력 토큰 부스트 ${boostedMaxTokens}`);
+    
+    // API 호출
+    const prompt = DEFAULT_COMPRESS_PROMPT_TEMPLATE + '\n\n---\n\n' + summaryText;
+    const response = await callCompressAPI(prompt, boostedMaxTokens, batchIdx, totalTargets, onProgress, state);
+    
+    if (!response) {
+        log(`[압축] 배치 ${batchIdx + 1} 응답 없음, 건너뜀`);
+        return {};
+    }
+    
+    // 응답 파싱
+    const parsed = parseCompressedResponse(response, batch);
+    const parsedCount = Object.keys(parsed).length;
+    
+    // 잘림 감지: 파싱 결과가 배치의 50% 미만이면 분할 재시도
+    if (parsedCount < batch.length * 0.5 && batch.length > 1) {
+        log(`[압축] 배치 ${batchIdx + 1} 잘림 감지: ${parsedCount}/${batch.length}개만 파싱됨 → 분할 재시도`);
+        
+        if (onProgress) {
+            onProgress(state.progress.current, totalTargets, `배치 ${batchIdx + 1} 잘림 감지 - 분할 재시도 중...`);
+        }
+        
+        // 배치를 반으로 분할하여 재시도
+        const mid = Math.ceil(batch.length / 2);
+        const firstHalf = batch.slice(0, mid);
+        const secondHalf = batch.slice(mid);
+        
+        const result = {};
+        
+        // 이미 성공적으로 파싱된 것은 보존
+        for (const [key, content] of Object.entries(parsed)) {
+            result[key] = content;
+        }
+        
+        // 실패한 항목만 재시도 (이미 파싱된 키 제외)
+        const parsedKeys = new Set(Object.keys(parsed).map(Number));
+        const failedFirst = firstHalf.filter(t => !parsedKeys.has(t.key));
+        const failedSecond = secondHalf.filter(t => !parsedKeys.has(t.key));
+        
+        // 첫 번째 반 재시도
+        if (failedFirst.length > 0) {
+            await new Promise(r => setTimeout(r, 2000));
+            const retryResult1 = await processCompressBatchSimple(failedFirst, batchIdx, totalTargets, onProgress, state, '분할A');
+            for (const [key, content] of Object.entries(retryResult1)) {
+                result[key] = content;
+            }
+        }
+        
+        // 두 번째 반 재시도
+        if (failedSecond.length > 0) {
+            await new Promise(r => setTimeout(r, 2000));
+            const retryResult2 = await processCompressBatchSimple(failedSecond, batchIdx, totalTargets, onProgress, state, '분할B');
+            for (const [key, content] of Object.entries(retryResult2)) {
+                result[key] = content;
+            }
+        }
+        
+        return result;
+    }
+    
+    return parsed;
+}
+
+/**
+ * 단순 배치 처리 (재시도용, 잘림 감지 없이 1회만 시도)
+ */
+async function processCompressBatchSimple(batch, batchIdx, totalTargets, onProgress, state, label = '') {
+    if (batch.length === 0) return {};
+    
+    const summaryText = batch
+        .map(t => `${t.groupHeader}\n${t.content.replace(/^#\d+(?:-\d+)?\s*\n?/, '').trim()}`)
+        .join('\n\n');
+    
+    const inputTokens = estimateTokens(summaryText);
+    const boostedMaxTokens = Math.max(8000, Math.ceil(inputTokens * 1.2));
+    
+    log(`[압축] ${label} 재시도: ${batch.length}개, 입력 ~${inputTokens}토큰, 출력 부스트 ${boostedMaxTokens}`);
+    
+    if (onProgress) {
+        onProgress(state.progress.current, totalTargets, `${label} 재시도 중... (${batch.length}개)`);
+    }
+    
+    const prompt = DEFAULT_COMPRESS_PROMPT_TEMPLATE + '\n\n---\n\n' + summaryText;
+    const response = await callCompressAPI(prompt, boostedMaxTokens, batchIdx, totalTargets, onProgress, state);
+    
+    if (!response) return {};
+    
+    return parseCompressedResponse(response, batch);
+}
+
+/**
+ * 압축용 API 호출 (재시도 로직 포함, 토큰 부스트 적용)
+ * @param {string} prompt - 프롬프트
+ * @param {number} maxTokens - 출력 토큰 부스트 값
+ * @param {number} batchIdx - 배치 인덱스
+ * @param {number} totalTargets - 전체 타겟 수
+ * @param {Function} onProgress - 진행률 콜백
+ * @param {Object} state - compressState 참조
+ * @returns {Promise<string|null>}
+ */
+async function callCompressAPI(prompt, maxTokens, batchIdx, totalTargets, onProgress, state) {
+    const MAX_RETRIES = 3;
+    
+    // 취소 확인
+    if (state.shouldCancel) return null;
+    
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+        try {
+            return await callSummaryAPI(prompt, { maxTokensOverride: maxTokens });
+        } catch (apiError) {
+            const isRateLimit = apiError.message?.includes('high demand') ||
+                apiError.message?.includes('rate') ||
+                apiError.message?.includes('429') ||
+                apiError.message?.includes('500') ||
+                apiError.message?.includes('overloaded');
+            
+            if (isRateLimit && attempt < MAX_RETRIES - 1) {
+                const delay = (attempt + 1) * 10;
+                log(`[압축] 배치 ${batchIdx + 1} API 과부하, ${delay}초 후 재시도 (${attempt + 1}/${MAX_RETRIES})`);
+                if (onProgress) {
+                    onProgress(state.progress.current, totalTargets, `API 과부하 - ${delay}초 대기 후 재시도...`);
+                }
+                await new Promise(r => setTimeout(r, delay * 1000));
+                
+                if (state.shouldCancel) return null;
+            } else {
+                log(`[압축] 배치 ${batchIdx + 1} API 오류: ${apiError.message}`);
+                return null;
+            }
+        }
+    }
+    return null;
+}
+
+/**
  * 압축 응답 파싱 (그룹 헤더 보존)
  * @param {string} response - AI 응답
  * @param {Array} batch - 원본 배치 타겟 목록
@@ -1751,42 +1902,86 @@ export async function compressSummaries(targetKeys, pinnedIndices = [], onProgre
 function parseCompressedResponse(response, batch) {
     const result = {};
     
-    // #숫자 또는 #숫자-숫자 패턴으로 분리
-    const sections = response.split(/(?=^#\d+(?:-\d+)?)/m);
+    // #숫자 또는 #숫자[-~]숫자 패턴으로 분리 (하이픈, 물결표 모두 인식)
+    const sections = response.split(/(?=^#\d+(?:[-~]\d+)?\s*$)/m);
     
     for (const section of sections) {
         const trimmed = section.trim();
         if (!trimmed) continue;
         
-        // 헤더 추출
-        const headerMatch = trimmed.match(/^#(\d+)(?:-(\d+))?/);
+        // 헤더 추출 (하이픈, 물결표 모두 인식)
+        const headerMatch = trimmed.match(/^#(\d+)(?:[-~](\d+))?/);
         if (!headerMatch) continue;
         
         const startNum = parseInt(headerMatch[1]);
         const endNum = headerMatch[2] ? parseInt(headerMatch[2]) : startNum;
         
         // 헤더 제거 후 내용 추출
-        const bodyContent = trimmed.replace(/^#\d+(?:-\d+)?\s*\n?/, '').trim();
+        const bodyContent = trimmed.replace(/^#\d+(?:[-~]\d+)?\s*\n?/, '').trim();
         if (!bodyContent) continue;
         
-        // 매칭되는 배치 타겟 찾기
-        const matchingTarget = batch.find(t => {
+        // 매칭되는 배치 타겟 찾기 (여러 전략으로 시도)
+        let matchingTarget = null;
+        
+        // 1차: 정확한 범위 매칭 (그룹 요약)
+        matchingTarget = batch.find(t => {
             if (t.isGroup) {
-                const rm = t.content.match(/^#(\d+)-(\d+)/);
+                const rm = t.content.match(/^#(\d+)[-~](\d+)/);
                 if (rm) return parseInt(rm[1]) === startNum && parseInt(rm[2]) === endNum;
             }
-            return t.key === startNum;
+            return false;
         });
         
+        // 2차: key 직접 매칭 (개별 요약)
+        if (!matchingTarget) {
+            matchingTarget = batch.find(t => t.key === startNum && !t.isGroup);
+        }
+        
+        // 3차: groupHeader 매칭 (숫자가 같은 그룹 찾기)
+        if (!matchingTarget) {
+            matchingTarget = batch.find(t => {
+                const ghMatch = t.groupHeader.match(/^#(\d+)(?:-(\d+))?$/);
+                if (!ghMatch) return false;
+                const ghStart = parseInt(ghMatch[1]);
+                const ghEnd = ghMatch[2] ? parseInt(ghMatch[2]) : ghStart;
+                return ghStart === startNum && ghEnd === endNum;
+            });
+        }
+        
+        // 4차: 범위 겹침 검사 (AI가 번호를 약간 다르게 쓴 경우)
+        if (!matchingTarget) {
+            matchingTarget = batch.find(t => {
+                if (t.isGroup) {
+                    const rm = t.content.match(/^#(\d+)[-~](\d+)/);
+                    if (rm) {
+                        const origStart = parseInt(rm[1]);
+                        const origEnd = parseInt(rm[2]);
+                        // 시작 번호가 같거나, 범위가 겹치면 매칭
+                        return origStart === startNum || (startNum >= origStart && startNum <= origEnd);
+                    }
+                }
+                return false;
+            });
+        }
+        
         if (matchingTarget) {
-            // 그룹 요약이면 #X-Y 헤더 다시 붙여서 저장
+            // 그룹 요약이면 원본 헤더 형식(#X-Y)으로 다시 붙여서 저장
             if (matchingTarget.isGroup) {
-                result[matchingTarget.key] = `#${startNum}-${endNum}\n${bodyContent}`;
+                const rm = matchingTarget.content.match(/^#(\d+)-(\d+)/);
+                if (rm) {
+                    result[matchingTarget.key] = `#${rm[1]}-${rm[2]}\n${bodyContent}`;
+                } else {
+                    result[matchingTarget.key] = `#${startNum}-${endNum}\n${bodyContent}`;
+                }
             } else {
                 result[matchingTarget.key] = bodyContent;
             }
+        } else {
+            log(`[압축 파싱] 매칭 실패: #${startNum}${endNum !== startNum ? '-' + endNum : ''} (배치 키: ${batch.map(t => t.groupHeader).join(', ')})`);
         }
     }
+    
+    log(`[압축 파싱] 결과: ${Object.keys(result).length}/${batch.length}개 매칭 성공`);
     
     return result;
 }

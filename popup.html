@@ -372,8 +372,26 @@
                     
                     <div class="summarizer-input-group">
                         <label for="summarizer-backend-max-tokens">Max Tokens</label>
-                        <input type="number" id="summarizer-backend-max-tokens" min="500" max="100000" step="500" value="4000" />
-                        <small class="summarizer-hint">API 응답 최대 토큰 수 (기본: 4000)</small>
+                        <input type="number" id="summarizer-backend-max-tokens" min="500" max="100000" step="500" value="8000" />
+                        <small class="summarizer-hint">API 응답 최대 토큰 수 (기본: 8000)</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-backend-temperature">Temperature <span id="summarizer-backend-temperature-value" class="summarizer-range-value">0.9</span></label>
+                        <input type="range" id="summarizer-backend-temperature" min="0" max="2" step="0.05" value="0.9" />
+                        <small class="summarizer-hint">낮을수록 일관적, 높을수록 창의적 (기본: 0.9)</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-backend-top-p">Top P <span id="summarizer-backend-top-p-value" class="summarizer-range-value">1</span></label>
+                        <input type="range" id="summarizer-backend-top-p" min="0" max="1" step="0.05" value="1" />
+                        <small class="summarizer-hint">핵 샘플링 확률 (기본: 1 = 사용 안 함)</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-backend-top-k">Top K <span id="summarizer-backend-top-k-value" class="summarizer-range-value">0</span></label>
+                        <input type="range" id="summarizer-backend-top-k" min="0" max="500" step="1" value="0" />
+                        <small class="summarizer-hint">상위 K개 토큰만 선택 (기본: 0 = 사용 안 함)</small>
                     </div>
                 </div>
                 
@@ -390,10 +408,35 @@
                         <small class="summarizer-hint">SillyTavern Connection Manager에서 설정한 프로필을 선택합니다</small>
                     </div>
                     
+                    <div class="summarizer-input-group" id="summarizer-st-max-tokens-group">
+                        <label for="summarizer-st-max-tokens">Max Tokens</label>
+                        <input type="number" id="summarizer-st-max-tokens" min="0" max="100000" step="500" value="4000" />
+                        <small class="summarizer-hint">Connection Profile 응답 최대 토큰 수 (0 = 프리셋 설정 사용, 기본: 4000)</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-st-temperature">Temperature <span id="summarizer-st-temperature-value" class="summarizer-range-value">0.9</span></label>
+                        <input type="range" id="summarizer-st-temperature" min="0" max="2" step="0.05" value="0.9" />
+                        <small class="summarizer-hint">낮을수록 일관적, 높을수록 창의적 (기본: 0.9)</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-st-top-p">Top P <span id="summarizer-st-top-p-value" class="summarizer-range-value">1</span></label>
+                        <input type="range" id="summarizer-st-top-p" min="0" max="1" step="0.05" value="1" />
+                        <small class="summarizer-hint">핵 샘플링 확률 (기본: 1 = 사용 안 함)</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-st-top-k">Top K <span id="summarizer-st-top-k-value" class="summarizer-range-value">0</span></label>
+                        <input type="range" id="summarizer-st-top-k" min="0" max="500" step="1" value="0" />
+                        <small class="summarizer-hint">상위 K개 토큰만 선택 (기본: 0 = 사용 안 함)</small>
+                    </div>
+                    
                     <div class="summarizer-toggle-row">
                         <span class="summarizer-toggle-label">
                             Raw 프롬프트 사용
-                            <small class="summarizer-hint">채팅 히스토리 제외, 캐릭터 프로필 정보만 AI에게 전송합니다</small>
+                            <small class="summarizer-hint">ON 권장 — 요약 전용 프롬프트만 AI에게 전송합니다</small>
+                            <small class="summarizer-hint summarizer-hint-warning"><i class="fa-solid fa-triangle-exclamation"></i>OFF 시 SillyTavern의 시스템 프롬프트/인스트럭트가 함께 전송되어 AI가 요약 대신 롤플레이 응답을 할 수 있습니다</small>
                         </span>
                         <label class="summarizer-toggle">
                             <input type="checkbox" id="summarizer-use-raw" checked />
@@ -444,7 +487,7 @@
                     
                     <div class="summarizer-input-group">
                         <label for="summarizer-custom-max-tokens">Max Tokens</label>
-                        <input type="number" id="summarizer-custom-max-tokens" min="500" max="100000" step="500" value="5000" />
+                        <input type="number" id="summarizer-custom-max-tokens" min="500" max="100000" step="500" value="8000" />
                         <small class="summarizer-hint">API 응답 최대 토큰 수 (기본: 5000)</small>
                     </div>
                     
@@ -452,6 +495,24 @@
                         <label for="summarizer-custom-timeout">타임아웃 (초)</label>
                         <input type="number" id="summarizer-custom-timeout" min="10" max="300" step="10" value="60" />
                         <small class="summarizer-hint">API 응답 대기 시간 (기본: 60초)</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-custom-temperature">Temperature <span id="summarizer-custom-temperature-value" class="summarizer-range-value">0.9</span></label>
+                        <input type="range" id="summarizer-custom-temperature" min="0" max="2" step="0.05" value="0.9" />
+                        <small class="summarizer-hint">낮을수록 일관적, 높을수록 창의적 (기본: 0.9)</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-custom-top-p">Top P <span id="summarizer-custom-top-p-value" class="summarizer-range-value">1</span></label>
+                        <input type="range" id="summarizer-custom-top-p" min="0" max="1" step="0.05" value="1" />
+                        <small class="summarizer-hint">핵 샘플링 확률 (기본: 1 = 사용 안 함)</small>
+                    </div>
+                    
+                    <div class="summarizer-input-group">
+                        <label for="summarizer-custom-top-k">Top K <span id="summarizer-custom-top-k-value" class="summarizer-range-value">0</span></label>
+                        <input type="range" id="summarizer-custom-top-k" min="0" max="500" step="1" value="0" />
+                        <small class="summarizer-hint">상위 K개 토큰만 선택 (기본: 0 = 사용 안 함)</small>
                     </div>
                     
                     <!-- 프리셋 저장 -->
@@ -652,8 +713,8 @@
                     <p class="summarizer-section-subtitle" style="margin-top: 12px; margin-bottom: 6px;">
                         <i class="fa-solid fa-compress"></i> 토큰 절약
                     </p>
-                    <div class="summarizer-btn-group summarizer-btn-grid-mobile">
-                        <button id="summarizer-compress-summaries" class="summarizer-btn summarizer-btn-secondary" title="기존 요약을 더 짧게 압축합니다">
+                    <div class="summarizer-btn-group">
+                        <button id="summarizer-compress-summaries" class="summarizer-btn summarizer-btn-secondary summarizer-btn-full" title="기존 요약을 더 짧게 압축합니다">
                             <i class="fa-solid fa-compress"></i> 압축 요약
                         </button>
                     </div>
@@ -1350,17 +1411,15 @@
                                 <span>전체</span>
                             </label>
                             <label class="summarizer-range-radio">
-                                <input type="radio" name="compress-range" value="recent" />
-                                <span>최근</span>
-                                <input type="number" id="summarizer-compress-recent-count" min="1" value="20" class="summarizer-range-count-input" disabled />
-                                <span class="summarizer-range-count-unit">개</span>
+                                <input type="radio" name="compress-range" value="custom" />
+                                <span>범위 지정</span>
                             </label>
-                            <label class="summarizer-range-radio">
-                                <input type="radio" name="compress-range" value="old" />
-                                <span>오래된</span>
-                                <input type="number" id="summarizer-compress-old-count" min="1" value="20" class="summarizer-range-count-input" disabled />
-                                <span class="summarizer-range-count-unit">개</span>
-                            </label>
+                        </div>
+                        <div id="summarizer-compress-custom-range" class="summarizer-custom-range-row" style="display:none;">
+                            <input type="number" id="summarizer-compress-range-start" min="1" value="1" class="summarizer-range-count-input" placeholder="시작" />
+                            <span class="summarizer-range-separator">~</span>
+                            <input type="number" id="summarizer-compress-range-end" min="1" value="1" class="summarizer-range-count-input" placeholder="끝" />
+                            <span class="summarizer-range-count-unit">번째</span>
                         </div>
                     </div>
                 </div>
@@ -1382,6 +1441,9 @@
             <div class="summarizer-modal-footer">
                 <button id="summarizer-compress-execute" class="summarizer-btn summarizer-btn-primary">
                     <i class="fa-solid fa-compress"></i> 압축 실행
+                </button>
+                <button id="summarizer-compress-save-file" class="summarizer-btn summarizer-btn-secondary" disabled>
+                    <i class="fa-solid fa-download"></i> 파일로 저장
                 </button>
                 <button id="summarizer-compress-apply" class="summarizer-btn summarizer-btn-success" disabled>
                     <i class="fa-solid fa-check"></i> 적용하기

@@ -163,16 +163,26 @@ export const defaultSettings = {
     apiSource: API_SOURCE.SILLYTAVERN,
     useRawPrompt: true,            // Raw 프롬프트 사용 (캐릭터 카드 Scenario 제외)
     stConnectionProfile: "",       // SillyTavern Connection Manager 프로필 (빈 문자열 = 현재 연결 사용)
+    stMaxTokens: 4000,             // Connection Profile 응답 최대 토큰 수 (0 = 프리셋 설정 사용)
+    stTemperature: 0.9,              // Connection Profile temperature (0~2)
+    stTopP: 1,                     // Connection Profile top_p (0~1)
+    stTopK: 0,                     // Connection Profile top_k (0 = 사용 안 함)
     
     // SillyTavern 백엔드 직접 호출 설정
     backendProvider: "google",     // 백엔드 프로바이더 (openai, claude, google, vertexai, openrouter, deepseek)
     backendModel: "",              // 백엔드 모델명
-    backendMaxTokens: 4000,        // 백엔드 max_tokens
+    backendMaxTokens: 8000,        // 백엔드 max_tokens
+    backendTemperature: 0.9,         // 백엔드 temperature (0~2)
+    backendTopP: 1,                // 백엔드 top_p (0~1)
+    backendTopK: 0,                // 백엔드 top_k (0 = 사용 안 함)
     
     customApiUrl: "",
     customApiKey: "",
     customApiModel: "",
-    customApiMaxTokens: 4000,      // Custom API max_tokens
+    customApiMaxTokens: 8000,      // Custom API max_tokens
+    customApiTemperature: 0.9,       // Custom API temperature (0~2)
+    customApiTopP: 1,              // Custom API top_p (0~1)
+    customApiTopK: 0,              // Custom API top_k (0 = 사용 안 함)
     customApiTimeout: 60,          // Custom API timeout (초)
     
     // 커스텀 API 프리셋
@@ -750,7 +760,7 @@ Your goal is MODERATE compression (roughly 60-80% of original length), NOT aggre
 
 ## Your Task
 Tighten the wording of each summary while keeping all important story beats intact.
-Aim to reduce each summary by about 20-40% — do NOT cut more than half.
+Aim to reduce each summary by about 20-30% — do NOT cut more than half.
 If a summary is already short (1-3 lines), keep it as-is or make only minimal changes.
 
 ## ⚠️ HOW to Compress (Read This First)
@@ -762,7 +772,7 @@ Decide what to delete based on CONTENT, not on counting sentences:
 - If YES → Keep it (trim wording if verbose)
 - If NO → It is a candidate for deletion
 - The compressed version must cover ALL important story beats from the original
-- After compression, the result should be roughly 60-80% of the original length
+- After compression, the result should be roughly 70-80% of the original length
 
 ### Sentences You CAN Delete Entirely:
 - Pure movement/transition with no dialogue or emotion ("walked to the door and sat down")
@@ -808,12 +818,15 @@ Decide what to delete based on CONTENT, not on counting sentences:
 - Pure transition filler ("then", "meanwhile", "after that" as standalone connectors)
 - BUT: if a sentence mixes mundane action with character dynamics, TRIM it instead of deleting
 
-## 📝 Output Format
-- Keep the EXACT same format as input: #MessageNumber followed by * Category: content
+## 📝 Output Format (CRITICAL — Follow Exactly)
+- Each summary MUST start with its header on a new line: #Number or #Number-Number
+- Use HYPHEN (-) for ranges, NOT tilde (~). Example: #0-4, #5-9, #10-14
+- After the header, output each category on a new line: * Category: content
 - Maintain ALL original category labels (* Scenario, * Location, * Date, * Time, etc.)
-- Preserve the message number headers exactly (#0, #1-5, etc.)
 - Do NOT merge multiple summaries into one
 - Do NOT add, rename, or remove any category labels
+- Do NOT add any text before the first # header — start output immediately with the first header
+- Do NOT add commentary, explanations, or notes — output ONLY the compressed summaries
 
 ## ⚠️ Important
 - NEVER invent, guess, or add information that was not in the original text
